@@ -71,7 +71,11 @@ public sealed class SearchTests : IDisposable
         Assert.Contains(all.Items, item => item.Name == "Annual Report 2025.pdf");
         Assert.Contains(all.Items, item => item.Name == "forklift.txt");
 
-        Assert.Equal(["forklift.txt"], Names("fork", index: index));
+        SearchResult? partial = null;
+        var forks = SearchEngine.Run(index, new SearchRequest { Query = "fork", Sort = "name" }, onProgress: result => partial = result);
+        Assert.Equal(["forklift.txt"], forks.Items.Select(item => item.Name));
+        Assert.NotNull(partial);
+        Assert.Equal(["forklift.txt"], partial.Items.Select(item => item.Name));
         var folders = SearchEngine.Run(index, new SearchRequest { Query = "type:folder", Limit = 1000 });
         Assert.Null(folders.Error);
         Assert.NotEmpty(folders.Items);

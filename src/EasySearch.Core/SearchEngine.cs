@@ -43,7 +43,7 @@ public static class SearchEngine
 
     readonly record struct Hit(int Index, int Score);
 
-    public static SearchResult Run(FileIndex index, SearchRequest request, CancellationToken cancel = default)
+    public static SearchResult Run(FileIndex index, SearchRequest request, CancellationToken cancel = default, Action<SearchResult>? onProgress = null)
     {
         var timer = Stopwatch.StartNew();
         List<CompiledQuery> branches;
@@ -96,6 +96,7 @@ public static class SearchEngine
 
         var best = new List<Hit>();
         long total = 0;
+        long lastProgress = 0;
         int rangeSize = Math.Max(8192, snapshot.Count / (Environment.ProcessorCount * 4));
 
         Parallel.ForEach(
@@ -119,39 +120,54 @@ public static class SearchEngine
             },
             local =>
             {
+                Hit[]? partialHits = null;
+                long partialTotal = 0;
                 lock (best)
                 {
                     total += local.Total;
                     while (local.Heap.TryDequeue(out var hit, out _)) best.Add(hit);
+                    long now = Stopwatch.GetTimestamp();
+                    if (onProgress is not null && (lastProgress == 0 || Stopwatch.GetElapsedTime(lastProgress, now).TotalMilliseconds >= 100))
+                    {
+                        lastProgress = now;
+                        partialHits = [.. best];
+                        partialTotal = total;
+                    }
                 }
+                if (partialHits is not null) onProgress!(CreateResult(partialHits, partialTotal));
             });
 
         cancel.ThrowIfCancellationRequested();
-        best.Sort(ranking);
-        if (best.Count > limit) best.RemoveRange(limit, best.Count - limit);
+        return CreateResult([.. best], total);
 
-        var items = new List<SearchHit>(best.Count);
-        foreach (var hit in best)
+        SearchResult CreateResult(Hit[] hits, long matchCount)
         {
-            int i = hit.Index;
-            bool isRoot = snapshot.Parent[i] < 0;
-            items.Add(new SearchHit
+            Array.Sort(hits, ranking);
+            if (hits.Length > limit) Array.Resize(ref hits, limit);
+
+            var items = new List<SearchHit>(hits.Length);
+            foreach (var hit in hits)
             {
-                Name = isRoot ? snapshot.GetPath(i) : snapshot.Name(i).ToString(),
-                Dir = snapshot.GetDirectory(i),
-                IsDir = snapshot.IsDirectory(i),
-                Size = snapshot.Size[i],
-                Modified = PathUtil.ToUnixMs(snapshot.Modified[i]),
-                Hidden = (snapshot.Flags[i] & (EntryFlags.Hidden | EntryFlags.HiddenTree)) != 0,
-            });
-        }
+                int i = hit.Index;
+                bool isRoot = snapshot.Parent[i] < 0;
+                items.Add(new SearchHit
+                {
+                    Name = isRoot ? snapshot.GetPath(i) : snapshot.Name(i).ToString(),
+                    Dir = snapshot.GetDirectory(i),
+                    IsDir = snapshot.IsDirectory(i),
+                    Size = snapshot.Size[i],
+                    Modified = PathUtil.ToUnixMs(snapshot.Modified[i]),
+                    Hidden = (snapshot.Flags[i] & (EntryFlags.Hidden | EntryFlags.HiddenTree)) != 0,
+                });
+            }
 
-        return new SearchResult
-        {
-            Total = (int)Math.Min(total, int.MaxValue),
-            ElapsedMs = timer.Elapsed.TotalMilliseconds,
-            Items = items,
-        };
+            return new SearchResult
+            {
+                Total = (int)Math.Min(matchCount, int.MaxValue),
+                ElapsedMs = timer.Elapsed.TotalMilliseconds,
+                Items = items,
+            };
+        }
     }
 
     /// <summary>

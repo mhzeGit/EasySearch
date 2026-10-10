@@ -570,7 +570,7 @@
   function onResults(message) {
     if (message.id !== state.searchId) return;
     const previous = state.keepSelection ? selectedItem() : null;
-    state.pending = false;
+    state.pending = message.partial === true;
     state.items = message.items || [];
     state.total = message.total || 0;
     state.elapsed = message.elapsedMs || 0;
@@ -668,7 +668,7 @@
     const scrollTop = els.list.scrollTop;
     let html = '';
 
-    if (state.pending) {
+    if (state.pending && state.items.length === 0) {
       html = `<div class="empty"><h2>Searching…</h2></div>`;
     } else if (state.error) {
       html = `<div class="empty error">${icon('info', 34)}<h2>That search isn’t quite right</h2><p>${esc(state.error)}</p></div>`;
@@ -716,7 +716,10 @@
 
   function renderCount() {
     if (state.error) { els.count.textContent = ''; return; }
-    if (state.pending) { els.count.textContent = 'Searching…'; return; }
+    if (state.pending) {
+      els.count.textContent = state.total > 0 ? `${number.format(state.total)}+ results · Searching…` : 'Searching…';
+      return;
+    }
     const total = number.format(state.total);
     const time = state.elapsed < 10 ? state.elapsed.toFixed(1) : Math.round(state.elapsed);
     els.count.textContent = `${total} ${state.total === 1 ? 'result' : 'results'} · ${time} ms`;

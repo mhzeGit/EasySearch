@@ -155,13 +155,22 @@ public sealed partial class MainForm
         {
             try
             {
-                var result = SearchEngine.Run(index, request, cancel.Token);
+                var result = SearchEngine.Run(index, request, cancel.Token, partial =>
+                {
+                    if (!cancel.IsCancellationRequested)
+                        Post(new { type = "results", id, partial.Total, partial.ElapsedMs, partial.Items, partial.Error, partial = true });
+                });
                 if (!cancel.IsCancellationRequested)
-                    Post(new { type = "results", id, result.Total, result.ElapsedMs, result.Items, result.Error });
+                    Post(new { type = "results", id, result.Total, result.ElapsedMs, result.Items, result.Error, partial = false });
             }
             catch (OperationCanceledException)
             {
                 // Superseded by a newer keystroke.
+            }
+            catch (Exception e)
+            {
+                if (!cancel.IsCancellationRequested)
+                    Post(new { type = "results", id, total = 0, elapsedMs = 0d, items = Array.Empty<SearchHit>(), error = e.Message, partial = false });
             }
         });
     }
