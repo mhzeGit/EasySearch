@@ -248,6 +248,7 @@
     explorerToken: '',
     types: [], // named types from the host: { name, label, exts, kind }
     sort: 'relevance',
+    sortDirections: Object.fromEntries(SORTS.map(s => [s.id, !!s.desc])),
     options: { matchCase: false, matchPath: false, regex: false },
     limit: 150,
     searchId: 0,
@@ -280,8 +281,8 @@
       else if (/^(in|source|location|inside|where|under|parent|path)$/i.test(match[3])) {
         const path = match[4].replace(/^"|"$/g, '');
         const label = path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || path;
-        html += `<span class="query-filter-chip query-folder-chip">${removeFilterButton(match)}<button type="button" class="query-folder-filter" data-folder-path="${esc(path)}" title="Open ${esc(path)} in File Explorer" aria-label="Open ${esc(path)} in File Explorer">${icon('folder', 14)}<span aria-hidden="true">${esc(label)}</span></button></span>`;
-      } else html += `<span class="query-filter-chip">${removeFilterButton(match)}<span class="query-filter" aria-hidden="true">${esc(match[0])}</span></span>`;
+        html += `<span class="query-filter-chip query-folder-chip" data-filter-start="${index}" data-filter-end="${index + match[0].length}">${removeFilterButton(match)}<button type="button" class="query-folder-filter" data-folder-path="${esc(path)}" title="Open ${esc(path)} in File Explorer" aria-label="Open ${esc(path)} in File Explorer">${icon('folder', 14)}<span aria-hidden="true">${esc(label)}</span></button></span>`;
+      } else html += `<span class="query-filter-chip" data-filter-start="${index}" data-filter-end="${index + match[0].length}">${removeFilterButton(match)}<span class="query-filter" aria-hidden="true">${esc(match[0])}</span></span>`;
       at = index + match[0].length;
     }
     const after = value.slice(at);
@@ -595,7 +596,7 @@
       id: ++state.searchId,
       query: state.query.trim(),
       sort: sort.id,
-      desc: !!sort.desc,
+      desc: !!state.sortDirections[sort.id],
       limit: state.limit,
       matchCase: state.options.matchCase,
       matchPath: state.options.matchPath,
@@ -945,7 +946,22 @@
     const setting = key => () => { state.settings[key] = !state.settings[key]; saveSettings(); newSearch(); };
     menu.open($('#btn-options'), [
       { head: 'Sort by' },
-      ...SORTS.map(s => ({ label: s.label, checked: s.id === state.sort, run: () => { state.sort = s.id; renderFilters(); newSearch(); } })),
+      ...SORTS.map(s => ({
+        label: s.label,
+        checked: s.id === state.sort,
+        tail: {
+          symbol: state.sortDirections[s.id] ? '↓' : '↑',
+          label: `Sort ${s.label} ${state.sortDirections[s.id] ? 'ascending' : 'descending'}`,
+          run: () => {
+            state.sort = s.id;
+            state.sortDirections[s.id] = !state.sortDirections[s.id];
+            renderFilters();
+            newSearch();
+            openOptionsMenu();
+          },
+        },
+        run: () => { state.sort = s.id; renderFilters(); newSearch(); },
+      })),
       { sep: true },
       { head: 'Matching' },
       { label: 'Match case', checked: state.options.matchCase, run: toggle('matchCase') },
@@ -1019,7 +1035,9 @@
         if (item.sep) return '<div class="menu-sep"></div>';
         const lead = item.icon ? icon(item.icon, 15) : `<span class="check">${item.checked ? icon('check', 14) : ''}</span>`;
         const tail = item.keys ? `<span class="keys">${keys(...item.keys)}</span>` : item.sub ? `<span class="sub">${esc(item.sub)}</span>` : '';
-        return `<button class="menu-item" data-m="${n++}">${lead}<span class="label">${esc(item.label)}</span>${tail}</button>`;
+        const index = n++;
+        if (item.tail) return `<div class="menu-item menu-item-split" data-m="${index}" role="option" aria-selected="${item.checked === true}">${lead}<span class="label">${esc(item.label)}</span><button type="button" class="menu-item-tail" data-tail="${index}" title="${esc(item.tail.label)}" aria-label="${esc(item.tail.label)}">${esc(item.tail.symbol)}</button></div>`;
+        return `<button class="menu-item" data-m="${index}">${lead}<span class="label">${esc(item.label)}</span>${tail}</button>`;
       }).join('');
       this.actionable = actionable;
       els.menu.style.minWidth = minWidth ? `${minWidth}px` : '';
@@ -1357,6 +1375,13 @@
   });
 
   els.menu.addEventListener('click', e => {
+    const tail = e.target.closest('.menu-item-tail');
+    if (tail) {
+      e.preventDefault();
+      e.stopPropagation();
+      menu.actionable[+tail.dataset.tail]?.tail?.run();
+      return;
+    }
     const item = e.target.closest('.menu-item');
     if (item) menu.choose(+item.dataset.m);
   });
@@ -1390,6 +1415,15 @@
       e.preventDefault();
       e.stopPropagation();
       host.post({ type: 'action', action: 'open', path: folder.dataset.folderPath });
+      return;
+    }
+    const chip = e.target.closest('.query-filter-chip');
+    if (chip) {
+      e.preventDefault();
+      e.stopPropagation();
+      els.query.focus();
+      const caret = Number(chip.dataset.filterEnd);
+      els.query.setSelectionRange(caret, caret);
       return;
     }
     if (menu.swallow) { menu.swallow = false; e.preventDefault(); e.stopPropagation(); }
