@@ -12,8 +12,11 @@
     <header class="searchblock">
       <div class="searchbar">
         <span class="searchbar-icon" data-icon="search" data-size="22"></span>
-        <input id="query" class="searchbar-input" type="text" placeholder="Search files and folders"
-               autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">
+        <span class="searchbar-query">
+          <span class="query-highlight" id="query-highlight" aria-hidden="true"></span>
+          <input id="query" class="searchbar-input" type="text" placeholder="Search files and folders"
+                 autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">
+        </span>
         <span class="searchbar-count" id="count"></span>
         <button class="icon-btn" id="btn-options" title="Sort and search options" data-icon="sliders" data-size="17"></button>
         <button class="icon-btn" id="btn-settings" title="Settings (Ctrl+,)" data-icon="gear" data-size="17"></button>
@@ -25,8 +28,6 @@
     <nav class="filters">
       <div class="kinds" id="kinds">
         <button class="chip" id="chip-kind" aria-haspopup="menu" title="File type"></button>
-        <input id="ext-input" class="ext-input" type="text" placeholder="pdf, docx, …" hidden
-               autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Custom file suffix">
       </div>
       <div class="filter-menus">
         <button class="chip" id="chip-size"></button>

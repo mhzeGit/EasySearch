@@ -64,26 +64,29 @@
     { id: 'code', label: 'Code' },
     { id: 'archive', label: 'Archives' },
     { id: 'app', label: 'Apps' },
+    { id: '3d', label: '3D models' },
   ];
 
-  const KB = 1024, MB = KB * 1024, GB = MB * 1024, DAY = 86400000;
-  const SIZES = [
-    { id: null, label: 'Any size' },
-    { id: 'empty', label: 'Empty', min: 0, max: 0 },
-    { id: 'tiny', label: 'Under 100 KB', min: 1, max: 100 * KB - 1 },
-    { id: 'small', label: '100 KB – 1 MB', min: 100 * KB, max: MB - 1 },
-    { id: 'medium', label: '1 – 100 MB', min: MB, max: 100 * MB - 1 },
-    { id: 'large', label: '100 MB – 1 GB', min: 100 * MB, max: GB - 1 },
-    { id: 'huge', label: 'Over 1 GB', min: GB },
-  ];
+  const DAY = 86400000;
   const startOfToday = () => new Date().setHours(0, 0, 0, 0);
-  const DATES = [
-    { id: null, label: 'Any time' },
-    { id: 'today', label: 'Today', after: () => startOfToday() },
-    { id: 'week', label: 'Last 7 days', after: () => Date.now() - 7 * DAY },
-    { id: 'month', label: 'Last 30 days', after: () => Date.now() - 30 * DAY },
-    { id: 'year', label: 'This year', after: () => new Date(new Date().getFullYear(), 0, 1).getTime() },
-    { id: 'old', label: 'Over a year ago', before: () => Date.now() - 365 * DAY },
+
+  /** Choices in the Size drop-down. Each one fills the same form that typing "size:" opens. */
+  const SIZE_PRESETS = [
+    { id: 'empty', label: 'Empty', fields: { op: 'eq', lo: '0', loUnit: 'B' } },
+    { id: 'tiny', label: 'Under 100 KB', fields: { op: 'max', lo: '100', loUnit: 'KB' } },
+    { id: 'small', label: '100 KB – 1 MB', fields: { op: 'between', lo: '100', loUnit: 'KB', hi: '1', hiUnit: 'MB' } },
+    { id: 'medium', label: '1 – 100 MB', fields: { op: 'between', lo: '1', loUnit: 'MB', hi: '100', hiUnit: 'MB' } },
+    { id: 'large', label: '100 MB – 1 GB', fields: { op: 'between', lo: '100', loUnit: 'MB', hi: '1', hiUnit: 'GB' } },
+    { id: 'huge', label: 'Over 1 GB', fields: { op: 'min', lo: '1', loUnit: 'GB' } },
+  ];
+  const isoOf = ms => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  /** Choices in the Modified drop-down; they fill the form that "date:" opens. */
+  const DATE_PRESETS = [
+    { id: 'today', label: 'Today', fields: () => ({ op: 'today' }) },
+    { id: 'week', label: 'Last 7 days', fields: () => ({ op: 'last', n: '7', unit: 'd' }) },
+    { id: 'month', label: 'Last 30 days', fields: () => ({ op: 'last', n: '30', unit: 'd' }) },
+    { id: 'year', label: 'This year', fields: () => ({ op: 'year' }) },
+    { id: 'old', label: 'Over a year ago', fields: () => ({ op: 'before', d1: isoOf(Date.now() - 365 * DAY) }) },
   ];
   const SORTS = [
     { id: 'relevance', label: 'Best match' },
@@ -241,13 +244,8 @@
     settingsTab: 'general',
     recording: false,
     query: '', // everything searched for: the size:/type: forms in chips, then the text box
-    chips: [],
+    chips: [], // the filter forms; type, size, date and folder filters all live here
     types: [], // named types from the host: { name, label, exts, kind }
-    kind: 'all', // a KINDS id, or 'custom' for the suffixes typed into state.ext
-    ext: '',
-    size: null,
-    modified: null,
-    scope: null, // { label, path }
     sort: 'relevance',
     options: { matchCase: false, matchPath: false, regex: false },
     limit: 150,
@@ -263,11 +261,19 @@
   };
 
   const els = {
-    window: $('#window'), query: $('#query'), count: $('#count'), ext: $('#ext-input'), list: $('#list'),
+    window: $('#window'), query: $('#query'), count: $('#count'), list: $('#list'),
     chips: $('#qchips'), suggest: $('#suggest'),
     preview: $('#preview'), status: $('#status'), hints: $('#hints'), settings: $('#settings'),
     menu: $('#menu'), toast: $('#toast'),
   };
+  const queryHighlight = $('#query-highlight');
+
+  function renderQueryHighlight() {
+    const value = els.query.value;
+    queryHighlight.innerHTML = esc(value).replace(/\b(AND|OR)\b/gi, word =>
+      `<span class="logic-${word.toUpperCase() === 'AND' ? 'and' : 'or'}">${word}</span>`);
+    queryHighlight.scrollLeft = els.query.scrollLeft;
+  }
 
   const iconCache = new Map(); // extension -> icon URL, so one request serves every file of a type
   const PER_FILE_ICONS = new Set(['exe', 'lnk', 'ico', 'cur', 'url', 'scr', 'msi']);
@@ -323,7 +329,7 @@
     { id: 'm', label: 'months' }, { id: 'y', label: 'years' },
   ];
   const newDateChip = (fields = {}) => ({ id: ++chipSeq, kind: 'date', op: 'last', n: '', unit: 'd', d1: '', d2: '', ...fields });
-  const newPlaceChip = (path = '') => ({ id: ++chipSeq, kind: 'place', path });
+  const newPlaceChip = (path = '', auto = false) => ({ id: ++chipSeq, kind: 'place', path, auto });
 
   /** Every spelling of a filter the backend accepts, and the form it opens. */
   const FILTER_FORM = {
@@ -512,6 +518,7 @@
   /** state.query = the forms, then whatever is typed in the box. */
   function syncQuery() {
     state.query = [...state.chips.map(chipToken).filter(Boolean), els.query.value.trim()].filter(Boolean).join(' ');
+    renderFilters(); // the filter bar always reads back what the forms say
   }
 
   /** A drop-down button; it opens the app's own menu instead of the system list, which can't be themed. */
@@ -731,7 +738,9 @@
   els.chips.addEventListener('input', e => {
     const field = e.target.dataset.f, root = e.target.closest('.qchip');
     if (!field || !root) return;
-    chipById(root.dataset.id)[field] = e.target.value;
+    const chip = chipById(root.dataset.id);
+    chip[field] = e.target.value;
+    if (chip.kind === 'place') chip.auto = false; // edited by hand: it stays when Explorer is left
     chipChanged(root);
     if (field === 'text') showSuggestions(e.target);
   });
@@ -803,12 +812,8 @@
 
   // ---- searching -------------------------------------------------------------------
 
-  /** The suffixes typed for the custom type: "pdf, .DOCX *.md" -> ['pdf', 'docx', 'md']. */
-  const customExts = () => state.kind !== 'custom' ? [] :
-    state.ext.split(/[\s,;|]+/).map(e => e.replace(/^[*.]+/, '').toLowerCase()).filter(Boolean);
-  const kindActive = () => state.kind === 'custom' ? customExts().length > 0 : state.kind !== 'all';
-  const hasFilters = () => kindActive() || state.size || state.modified || state.scope;
-  const isSearching = () => state.query.trim().length > 0 || hasFilters();
+  const hasFilters = () => state.chips.some(chip => chipToken(chip));
+  const isSearching = () => state.query.trim().length > 0;
 
   function runSearch({ keepSelection = false } = {}) {
     if (!isSearching()) {
@@ -818,8 +823,6 @@
       return;
     }
 
-    const size = SIZES.find(s => s.id === state.size) || {};
-    const date = DATES.find(d => d.id === state.modified) || {};
     const sort = SORTS.find(s => s.id === state.sort) || SORTS[0];
     state.pending = true;
     state.keepSelection = keepSelection;
@@ -827,14 +830,7 @@
     host.post({
       type: 'search',
       id: ++state.searchId,
-      query: state.query.trim(),
-      kind: state.kind === 'custom' ? 'all' : state.kind,
-      extensions: customExts().join(' '),
-      sizeMin: size.min ?? null,
-      sizeMax: size.max ?? null,
-      modifiedAfter: date.after ? date.after() : null,
-      modifiedBefore: date.before ? date.before() : null,
-      scope: state.scope ? state.scope.path : null,
+      query: state.query.trim(), // the filter forms are already part of it, as size:, type:, date: and in:
       sort: sort.id,
       desc: !!sort.desc,
       limit: state.limit,
@@ -910,12 +906,14 @@
   const breadcrumbText = dir => breadcrumb(dir).replace(/<i>›<\/i>/g, ' › ').replace(/&amp;/g, '&');
 
   function applyPreset(preset) {
-    state.kind = preset.kind || 'all';
-    state.size = preset.size || null;
-    state.modified = preset.modified || null;
-    state.scope = preset.scope || null;
+    state.chips = [];
+    if (preset.kind) state.chips.push(newTypeChip(preset.kind));
+    if (preset.size) state.chips.push(newSizeChip(SIZE_PRESETS.find(p => p.id === preset.size).fields));
+    if (preset.modified) state.chips.push(newDateChip(DATE_PRESETS.find(p => p.id === preset.modified).fields()));
+    if (preset.scope) state.chips.push(newPlaceChip(preset.scope.path));
     state.sort = preset.sort || state.settings.defaultSort;
-    renderFilters();
+    renderChips();
+    syncQuery();
     newSearch();
   }
 
@@ -1109,38 +1107,99 @@
 
   // ---- filters ---------------------------------------------------------------------
 
+  const folderName = path => path.replace(/\\+$/, '').split('\\').pop() || path;
+  const firstChip = kind => state.chips.find(c => c.kind === kind) || null;
+  const unitLabel = (list, id, n) => {
+    const label = list.find(u => u.id === id)?.label ?? id;
+    return +n === 1 ? label.replace(/s$/, '') : label;
+  };
+  const dayText = iso => new Date(`${iso}T00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+
+  /** What a filter form says, for the buttons in the filter bar; null while it is still empty. */
+  function chipSummary(chip) {
+    if (!chipToken(chip)) return null;
+    if (chip.kind === 'type') {
+      const words = typeWords(chip.text);
+      return words.map(w => KINDS.find(k => k.id === normName(w))?.label ?? w).join(', ');
+    }
+    if (chip.kind === 'place') return folderName(chip.path.trim().replace(/^"|"$/g, ''));
+    if (chip.kind === 'size') {
+      const lo = `${amount(chip.lo)} ${chip.loUnit}`, hi = `${amount(chip.hi)} ${chip.hiUnit}`;
+      switch (chip.op) {
+        case 'between': return amount(chip.lo) && amount(chip.hi) ? `${lo} – ${hi}` : amount(chip.lo) ? `≥ ${lo}` : `≤ ${hi}`;
+        case 'max': return `≤ ${lo}`;
+        case 'eq': return +amount(chip.lo) === 0 ? 'Empty' : `= ${lo}`;
+        default: return `≥ ${lo}`;
+      }
+    }
+    switch (chip.op) {
+      case 'last': return `Last ${chip.n.trim()} ${unitLabel(DATE_UNITS, chip.unit, chip.n)}`;
+      case 'on': return dayText(chip.d1);
+      case 'before': return `Before ${dayText(chip.d1)}`;
+      case 'after': return `After ${dayText(chip.d1)}`;
+      case 'between':
+        return chip.d1 && chip.d2 ? `${dayText(chip.d1)} – ${dayText(chip.d2)}` : chip.d1 ? `From ${dayText(chip.d1)}` : `Until ${dayText(chip.d2)}`;
+      default: return DATE_OPS.find(o => o.id === chip.op).label.replace(/^./, c => c.toUpperCase());
+    }
+  }
+
   function renderFilters() {
-    const chip = (id, label, active) => {
+    const button = (id, kind, fallback) => {
+      const text = firstChip(kind) && chipSummary(firstChip(kind));
       const el = $(id);
-      el.classList.toggle('on', !!active);
-      el.innerHTML = `<span>${esc(label)}</span>${icon('chevron', 13)}`;
+      el.classList.toggle('on', !!text);
+      el.innerHTML = `<span>${esc(text || fallback)}</span>${icon('chevron', 13)}`;
     };
-    const custom = state.kind === 'custom';
-    const exts = customExts();
-    chip('#chip-kind', custom ? (exts.length ? exts.map(e => '.' + e).join(' ') : 'Custom') : KINDS.find(k => k.id === state.kind).label, kindActive());
-    els.ext.hidden = !custom;
-    if (els.ext.value !== state.ext) els.ext.value = state.ext;
-    chip('#chip-size', state.size ? SIZES.find(s => s.id === state.size).label : 'Size', state.size);
-    chip('#chip-modified', state.modified ? DATES.find(d => d.id === state.modified).label : 'Modified', state.modified);
-    chip('#chip-scope', state.scope ? state.scope.label : 'Everywhere', state.scope);
+    button('#chip-kind', 'type', 'All types');
+    button('#chip-size', 'size', 'Size');
+    button('#chip-modified', 'date', 'Modified');
+    button('#chip-scope', 'place', 'Everywhere');
 
     const o = state.options;
     $('#btn-options').classList.toggle('active', o.matchCase || o.matchPath || o.regex || state.sort !== 'relevance');
   }
 
-  function setKind(kind) {
-    state.kind = kind;
-    renderFilters();
+  /**
+   * Puts a filter into the search bar exactly as typing "size:" (or type:, date:, in:) would:
+   * the same form, reused when one is already there.
+   */
+  function setFilter(kind, fields, { focus = false } = {}) {
+    const blank = kind === 'size' ? newSizeChip(fields)
+      : kind === 'date' ? newDateChip(fields)
+      : kind === 'place' ? newPlaceChip(fields.path, !!fields.auto)
+      : newTypeChip(fields.text);
+    let chip = firstChip(kind);
+    if (chip) {
+      const id = chip.id;
+      for (const key of Object.keys(chip)) delete chip[key];
+      Object.assign(chip, blank, { id });
+    } else {
+      chip = blank;
+      state.chips.push(chip);
+    }
+    renderChips();
+    syncQuery();
+    newSearch();
+    if (focus) focusChip(chip);
+    return chip;
+  }
+
+  function clearFilter(kind) {
+    state.chips = state.chips.filter(c => c.kind !== kind);
+    renderChips();
+    syncQuery();
     newSearch();
   }
 
   function resetFilters() {
-    state.kind = 'all';
-    state.ext = '';
-    state.size = state.modified = state.scope = null;
-    renderFilters();
+    state.chips = [];
+    renderChips();
+    syncQuery();
     newSearch();
   }
+
+  /** Same-valued fields, so a preset can show as ticked. */
+  const matches = (chip, fields) => !!chip && Object.keys(fields).every(k => chip[k] === fields[k]);
 
   function setQuery(text) {
     els.query.value = text;
@@ -1151,54 +1210,73 @@
       els.query.value = rest;
     }
     renderChips();
+    renderQueryHighlight();
     syncQuery();
     els.query.focus();
     newSearch();
   }
 
-  const folderName = path => path.replace(/\\+$/, '').split('\\').pop() || path;
-
   function openKindMenu() {
-    const items = KINDS.map(k => ({ label: k.label, checked: k.id === state.kind, run: () => setKind(k.id) }));
-    const exts = customExts();
+    const current = firstChip('type');
+    const words = current && chipToken(current) ? typeWords(current.text).map(normName) : [];
+    const items = KINDS.map(k => ({
+      label: k.label,
+      checked: k.id === 'all' ? words.length === 0 : words.length === 1 && words[0] === k.id,
+      run: () => (k.id === 'all' ? clearFilter('type') : setFilter('type', { text: k.id })),
+    }));
     items.push({ sep: true }, {
       label: 'Custom…',
-      sub: exts.length ? exts.map(e => '.' + e).join(' ') : 'Type a suffix',
-      checked: state.kind === 'custom',
-      run: () => {
-        setKind('custom');
-        els.ext.focus();
-        els.ext.select();
-      },
+      sub: 'names or suffixes',
+      checked: words.length > 0 && !(words.length === 1 && KINDS.some(k => k.id === words[0])),
+      run: () => (current ? focusChip(current) : setFilter('type', { text: '' }, { focus: true })),
     });
     menu.open($('#chip-kind'), items);
   }
 
   function openSizeMenu() {
-    menu.open($('#chip-size'), SIZES.map(s => ({
-      label: s.label, checked: s.id === state.size, run: () => { state.size = s.id; renderFilters(); newSearch(); },
-    })));
+    const current = firstChip('size');
+    const items = [{ label: 'Any size', checked: !current || !chipToken(current), run: () => clearFilter('size') }];
+    for (const preset of SIZE_PRESETS)
+      items.push({ label: preset.label, checked: matches(current, preset.fields), run: () => setFilter('size', preset.fields) });
+    items.push({ sep: true }, {
+      label: 'Custom…',
+      sub: 'size form',
+      run: () => (current ? focusChip(current) : setFilter('size', {}, { focus: true })),
+    });
+    menu.open($('#chip-size'), items);
   }
 
   function openModifiedMenu() {
-    menu.open($('#chip-modified'), DATES.map(d => ({
-      label: d.label, checked: d.id === state.modified, run: () => { state.modified = d.id; renderFilters(); newSearch(); },
-    })));
+    const current = firstChip('date');
+    const items = [{ label: 'Any time', checked: !current || !chipToken(current), run: () => clearFilter('date') }];
+    for (const preset of DATE_PRESETS) {
+      const fields = preset.fields();
+      items.push({ label: preset.label, checked: matches(current, fields), run: () => setFilter('date', fields) });
+    }
+    items.push({ sep: true }, {
+      label: 'Custom…',
+      sub: 'date form',
+      run: () => (current ? focusChip(current) : setFilter('date', {}, { focus: true })),
+    });
+    menu.open($('#chip-modified'), items);
   }
 
   function openScopeMenu() {
-    const choose = scope => { state.scope = scope; renderFilters(); newSearch(); };
-    const same = path => state.scope && state.scope.path.toLowerCase() === path.toLowerCase();
-    const items = [{ label: 'Everywhere', checked: !state.scope, run: () => choose(null) }];
+    const current = firstChip('place');
+    const path = current ? current.path.trim().toLowerCase().replace(/\\$/, '') : '';
+    const same = other => path && path === other.toLowerCase().replace(/\\$/, '');
+    const choose = target => () => setFilter('place', { path: target });
+
+    const items = [{ label: 'Everywhere', checked: !path, run: () => clearFilter('place') }];
     if (state.places.length) items.push({ head: 'Places' });
-    for (const place of state.places)
-      items.push({ label: place.label, checked: same(place.path), run: () => choose(place) });
+    for (const place of state.places) items.push({ label: place.label, checked: same(place.path), run: choose(place.path) });
     items.push({ head: 'Indexed locations' });
-    for (const root of state.settings.roots)
-      items.push({ label: root, checked: same(root), run: () => choose({ label: folderName(root), path: root }) });
-    if (state.scope && !items.some(i => i.checked))
-      items.push({ sep: true }, { label: state.scope.label, sub: 'Current', checked: true, run: () => {} });
-    items.push({ sep: true }, { label: 'Choose folder…', run: () => host.post({ type: 'pickFolder', purpose: 'scope' }) });
+    for (const root of state.settings.roots) items.push({ label: root, checked: same(root), run: choose(root) });
+    if (path && !items.some(i => i.checked))
+      items.push({ sep: true }, { label: folderName(current.path.trim()), sub: 'Current', checked: true, run: () => focusChip(current) });
+    items.push({ sep: true },
+      { label: 'Choose folder…', run: () => host.post({ type: 'pickFolder', purpose: 'scope' }) },
+      { label: 'Type a path…', run: () => (current ? focusChip(current) : setFilter('place', { path: '' }, { focus: true })) });
     menu.open($('#chip-scope'), items, { align: 'right' });
   }
 
@@ -1233,12 +1311,11 @@
     if (action === 'open' || action === 'reveal') rememberSearch();
     if (action === 'searchHere') {
       const path = item.isDir ? pathOf(item) : item.dir;
-      state.scope = { label: folderName(path), path };
-      state.chips = [];
-      renderChips();
+      state.chips = state.chips.filter(c => c.kind !== 'place');
+      state.chips.push(newPlaceChip(path));
       els.query.value = '';
+      renderChips();
       syncQuery();
-      renderFilters();
       newSearch();
       return;
     }
@@ -1578,16 +1655,13 @@
   // ---- input -----------------------------------------------------------------------
 
   els.query.addEventListener('input', () => {
+    renderQueryHighlight();
     if (convertTypedFilters()) return;
     syncQuery();
     newSearch();
   });
-
-  els.ext.addEventListener('input', () => {
-    state.ext = els.ext.value;
-    renderFilters();
-    newSearch();
-  });
+  els.query.addEventListener('scroll', renderQueryHighlight);
+  renderQueryHighlight();
 
   $('#chip-kind').addEventListener('click', openKindMenu);
   $('#chip-size').addEventListener('click', openSizeMenu);
@@ -1636,7 +1710,7 @@
       menu.close();
       if (reopen) { e.preventDefault(); e.stopPropagation(); menu.swallow = true; }
     }
-    if (state.view === 'main' && e.target !== els.query && e.target !== els.ext && !e.target.closest('.preview, .qchip')) e.preventDefault();
+    if (state.view === 'main' && e.target !== els.query && !e.target.closest('.preview, .qchip')) e.preventDefault();
 
     // Empty parts of the top bar act as a title bar: dragging them moves the window.
     if (e.button === 0 && e.target.closest('.searchbar, .set-head') && !e.target.closest('input, button')) host.post({ type: 'drag' });
@@ -1663,12 +1737,6 @@
     // Inside a size/type form, keys belong to the form.
     if (document.activeElement?.closest('.qchip')) return chipKey(e);
 
-    // In the custom suffix box, typing stays there; Enter, Esc or Tab hands focus back to the search box.
-    if (document.activeElement === els.ext) {
-      if (['Enter', 'Escape', 'Tab'].includes(e.key)) { e.preventDefault(); els.query.focus(); return; }
-      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    }
-
     // Typing always goes to the search box, even after clicking around in the preview.
     if (document.activeElement !== els.query && !ctrl && !e.altKey && e.key.length === 1) els.query.focus();
 
@@ -1687,15 +1755,20 @@
         break;
       }
       case 'Tab': {
-        // Cycles the preset types; the custom suffix sits just outside the ring.
+        // Steps through the preset types, filling the Type form as the drop-down does.
         const step = e.shiftKey ? -1 : 1;
-        const at = state.kind === 'custom' ? (step > 0 ? -1 : 0) : KINDS.findIndex(k => k.id === state.kind);
-        setKind(KINDS[(at + step + KINDS.length) % KINDS.length].id);
+        const current = firstChip('type');
+        const words = current && chipToken(current) ? typeWords(current.text).map(normName) : [];
+        const at = words.length === 0 ? 0 : words.length === 1 ? KINDS.findIndex(k => k.id === words[0]) : -1;
+        const next = KINDS[(at + step + KINDS.length) % KINDS.length];
+        if (next.id === 'all') clearFilter('type');
+        else setFilter('type', { text: next.id });
         break;
       }
       case 'Escape':
-        if (state.query) setQuery('');
-        else if (hasFilters()) resetFilters();
+        // Typed text first, then the filter forms, then the window.
+        if (els.query.value) { els.query.value = ''; syncQuery(); newSearch(); }
+        else if (state.chips.length) resetFilters();
         else host.post({ type: 'hide' });
         break;
       case 'k': if (!ctrl) return; openActionsMenu(); break;
@@ -1722,11 +1795,7 @@
       chipChanged($(`.qchip[data-id="${chip.id}"]`, els.chips));
       return focusChip(chip);
     }
-    if (purpose === 'scope') {
-      state.scope = { label: folderName(path), path };
-      renderFilters();
-      return newSearch();
-    }
+    if (purpose === 'scope') return void setFilter('place', { path });
     if (purpose === 'exclude') return addExclusion(path);
     if (purpose === 'root' && !state.settings.roots.some(r => r.toLowerCase() === path.toLowerCase())) {
       state.settings.roots.push(path);
@@ -1740,19 +1809,13 @@
    * way is replaced the next time it is opened from somewhere else, but one picked by hand stays.
    */
   function onExplorerFolder(path) {
+    const current = firstChip('place');
     if (path) {
-      if (state.scope && !state.scope.auto && state.scope.path.toLowerCase() === path.toLowerCase()) return;
-      state.scope = { label: folderName(path), path, auto: true };
-      renderFilters();
-      if (state.view === 'main') {
-        toast(`Searching in ${state.scope.label}`);
-        newSearch();
-      }
-    } else if (state.scope?.auto) {
-      state.scope = null;
-      renderFilters();
-      if (isSearching()) newSearch();
-      else showHome();
+      if (current && !current.auto && current.path.trim().toLowerCase() === path.toLowerCase()) return;
+      setFilter('place', { path, auto: true });
+      if (state.view === 'main') toast(`Searching in ${folderName(path)}`);
+    } else if (current?.auto) {
+      clearFilter('place');
     }
   }
 
