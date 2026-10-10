@@ -794,15 +794,6 @@
       html = hasQuery()
         ? `<div class="empty">${icon('search', 34)}<h2>No results</h2><p>Nothing matches that search.${reset}${hidden}${indexing}</p></div>`
         : `<div class="empty">${icon('search', 34)}<h2>No indexed files yet</h2><p>${indexing || 'Add a folder to the index in Settings.'}</p></div>`;
-    } else {
-      const terms = highlightTerms(state.query);
-      state.items.forEach((item, index) => {
-        html += `<div class="row${index === state.selected ? ' sel' : ''}${item.hidden ? ' dim' : ''}" data-i="${index}" role="option">
-          ${rowIcon(item)}
-          <span class="row-main"><span class="row-name">${highlight(item.name, terms)}</span><span class="row-path">${breadcrumb(item.dir)}</span></span>
-          <span class="row-meta"><b>${formatDate(item.modified)}</b><span>${item.isDir ? 'Folder' : formatSize(item.size)}</span></span>
-        </div>`;
-      });
     }
 
     if (state.items.length > 0 && !state.error) {
@@ -810,30 +801,34 @@
       // batch makes WebView2 briefly clear and reload every row (including its shell icons), which
       // looks like a flash. Reuse rows with the same path and only rebuild rows whose data changed.
       const existing = new Map([...els.list.querySelectorAll('.row[data-key]')].map(row => [row.dataset.key, row]));
-      const fragment = document.createDocumentFragment();
+      const rows = [];
+      const terms = highlightTerms(state.query);
       state.items.forEach((item, index) => {
         const key = pathOf(item);
         const signature = JSON.stringify(item);
         let row = existing.get(key);
-        if (row && row.dataset.signature === signature) {
+        if (row) {
           existing.delete(key);
         } else {
           const holder = document.createElement('div');
-          const terms = highlightTerms(state.query);
           holder.innerHTML = `<div class="row${index === state.selected ? ' sel' : ''}${item.hidden ? ' dim' : ''}" data-i="${index}" data-key="${esc(key)}" data-signature="${esc(signature)}" role="option">
             ${rowIcon(item)}
-            <span class="row-main"><span class="row-name">${highlight(item.name, terms)}</span><span class="row-path">${breadcrumb(item.dir)}</span></span>
+            <span class="row-main"><span class="row-name">${highlight(item.name, terms)}</span><span class="row-path">${esc(item.dir)}</span></span>
             <span class="row-meta"><b>${formatDate(item.modified)}</b><span>${item.isDir ? 'Folder' : formatSize(item.size)}</span></span>
           </div>`;
-          const replacement = holder.firstElementChild;
-          if (row) { row.replaceWith(replacement); row = replacement; existing.delete(key); }
-          else row = replacement;
+          row = holder.firstElementChild;
         }
         row.dataset.i = index;
         row.classList.toggle('sel', index === state.selected);
-        fragment.append(row);
+        rows.push(row);
       });
-      els.list.replaceChildren(fragment);
+      // Reorder in place. Moving the whole list through a detached fragment can make WebView2
+      // repaint the content surface even though every displayed result is unchanged.
+      rows.forEach((row, index) => {
+        const current = els.list.children[index];
+        if (current !== row) els.list.insertBefore(row, current || null);
+      });
+      while (els.list.children.length > rows.length) els.list.lastElementChild.remove();
     } else if (els.list.innerHTML !== html) {
       els.list.innerHTML = html;
     }
@@ -842,6 +837,13 @@
     renderHints();
   }
 
+          if (row.dataset.signature !== signature) {
+            row.querySelector('.row-name').innerHTML = highlight(item.name, terms);
+            row.querySelector('.row-path').textContent = item.dir;
+            row.querySelector('.row-meta').innerHTML = `<b>${formatDate(item.modified)}</b><span>${item.isDir ? 'Folder' : formatSize(item.size)}</span>`;
+            row.classList.toggle('dim', !!item.hidden);
+            row.dataset.signature = signature;
+          }
   function select(index, { scroll = true } = {}) {
     if (state.items.length === 0) return;
     index = Math.max(0, Math.min(state.items.length - 1, index));
@@ -913,7 +915,7 @@
     }
 
     const path = pathOf(item);
-    const previewKey = `${path}\0${item.modified}\0${item.size}`;
+    const previewKey = path;
     if (renderedPreviewKey === previewKey) return;
     renderedPreviewKey = previewKey;
     const kind = kindOf(item);
