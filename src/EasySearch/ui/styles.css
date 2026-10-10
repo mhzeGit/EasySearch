@@ -141,8 +141,10 @@ svg.i { flex: none; display: block; }
 .query-highlight { z-index: 2; color: var(--text); pointer-events: none; }
 .query-caret {
   position: absolute;
+  top: 50%;
   width: 1px;
   height: 21px;
+  transform: translateY(-50%);
   background: var(--accent);
   pointer-events: none;
   animation: query-caret-blink 1s steps(2, start) infinite;

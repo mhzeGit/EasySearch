@@ -332,7 +332,6 @@
     marker.className = 'query-caret';
     marker.setAttribute('aria-hidden', 'true');
     marker.style.left = `${rect.left - parent.left + queryHighlight.scrollLeft}px`;
-    marker.style.top = `${rect.top - parent.top}px`;
     queryHighlight.append(marker);
   }
 
