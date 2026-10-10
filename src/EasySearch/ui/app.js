@@ -331,7 +331,8 @@
     const marker = document.createElement('span');
     marker.className = 'query-caret';
     marker.setAttribute('aria-hidden', 'true');
-    marker.style.left = `${rect.left - parent.left + queryHighlight.scrollLeft}px`;
+    const endGap = chip && caret >= Number(chip.dataset.filterEnd) ? 5 : 0;
+    marker.style.left = `${rect.left - parent.left + queryHighlight.scrollLeft + endGap}px`;
     queryHighlight.append(marker);
   }
 
@@ -1369,11 +1370,7 @@
   els.query.addEventListener('input', () => {
     const folderPick = FOLDER_PICK_TOKEN.exec(els.query.value);
     if (folderPick) {
-      const query = els.query.value.slice(0, folderPick.index).trimEnd();
-      els.query.value = query;
-      state.folderPickQuery = query;
-      renderQueryHighlight();
-      syncQuery();
+      state.folderPickQuery = els.query.value.slice(0, folderPick.index).trimEnd();
       host.post({ type: 'pickFolder', purpose: 'addFilterPlace' });
       return;
     }
@@ -1480,6 +1477,11 @@
     if (chip) {
       e.preventDefault();
       e.stopPropagation();
+      const folderChip = chip.querySelector('.query-folder-filter');
+      if (folderChip) {
+        host.post({ type: 'action', action: 'open', path: folderChip.dataset.folderPath });
+        return;
+      }
       els.query.focus();
       const caret = Number(chip.dataset.filterEnd);
       els.query.setSelectionRange(caret, caret);
@@ -1544,7 +1546,7 @@
       const prefix = state.folderPickQuery || '';
       state.folderPickQuery = '';
       const token = chipToken(newPlaceChip(path));
-      els.query.value = `${prefix}${prefix ? ' AND ' : ''}${token}`;
+      els.query.value = `${prefix}${prefix ? ' AND ' : ''}${token} `;
       renderQueryHighlight(); syncQuery(); newSearch();
       els.query.focus();
       els.query.setSelectionRange(els.query.value.length, els.query.value.length);

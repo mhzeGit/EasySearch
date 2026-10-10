@@ -292,6 +292,7 @@ public sealed partial class MainForm
 
     void PickFolder(string purpose)
     {
+        Cursor.Show();
         using var dialog = new FolderBrowserDialog
         {
             Description = purpose == "exclude" ? "Choose a folder to leave out of the index" : "Choose a folder",
@@ -307,6 +308,8 @@ public sealed partial class MainForm
         finally
         {
             _suppressHide = false;
+            Cursor.Show();
+            Cursor.Current = Cursors.Arrow;
             Activate();
             _web.Focus();
         }
