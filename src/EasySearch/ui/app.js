@@ -276,29 +276,64 @@
     for (const match of value.matchAll(syntax)) {
       const index = match.index ?? 0;
       const before = value.slice(at, index);
-      if (before) html += `<span aria-hidden="true">${esc(before)}</span>`;
-      if (match[2]) html += `<span aria-hidden="true">${esc(match[1])}<span class="logic-${match[2].toLowerCase()}">${esc(match[2])}</span></span>`;
+      if (before) html += `<span aria-hidden="true" data-query-start="${at}" data-query-end="${index}">${esc(before)}</span>`;
+      if (match[2]) html += `<span aria-hidden="true" data-query-start="${index}" data-query-end="${index + match[0].length}">${esc(match[1])}<span class="logic-${match[2].toLowerCase()}">${esc(match[2])}</span></span>`;
       else if (/^(in|source|location|inside|where|under|parent|path)$/i.test(match[3])) {
         const path = match[4].replace(/^"|"$/g, '');
         const label = path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || path;
-        html += `<span class="query-filter-chip query-folder-chip" data-filter-start="${index}" data-filter-end="${index + match[0].length}">${removeFilterButton(match)}<button type="button" class="query-folder-filter" data-folder-path="${esc(path)}" title="Open ${esc(path)} in File Explorer" aria-label="Open ${esc(path)} in File Explorer">${icon('folder', 14)}<span aria-hidden="true">${esc(label)}</span></button></span>`;
-      } else html += `<span class="query-filter-chip" data-filter-start="${index}" data-filter-end="${index + match[0].length}">${removeFilterButton(match)}<span class="query-filter" aria-hidden="true">${esc(match[0])}</span></span>`;
+        html += `<span class="query-filter-chip query-folder-chip" data-filter-start="${index}" data-filter-end="${index + match[0].length}">${removeFilterButton(match)}<button type="button" class="query-folder-filter" data-query-start="${index}" data-query-end="${index + match[0].length}" data-folder-path="${esc(path)}" title="Open ${esc(path)} in File Explorer" aria-label="Open ${esc(path)} in File Explorer">${icon('folder', 14)}<span aria-hidden="true">${esc(label)}</span></button></span>`;
+      } else html += `<span class="query-filter-chip" data-filter-start="${index}" data-filter-end="${index + match[0].length}">${removeFilterButton(match)}<span class="query-filter" data-query-start="${index}" data-query-end="${index + match[0].length}" aria-hidden="true">${esc(match[0])}</span></span>`;
       at = index + match[0].length;
     }
     const after = value.slice(at);
-    if (after) html += `<span aria-hidden="true">${esc(after)}</span>`;
+    if (after) html += `<span aria-hidden="true" data-query-start="${at}" data-query-end="${value.length}">${esc(after)}</span>`;
     queryHighlight.innerHTML = html;
     const hasFilterChip = queryHighlight.querySelector('.query-filter-chip');
     if (hasFilterChip) {
-      // The input contains the full token (or directory path), while the overlay renders a shorter chip.
-      // Hide the input caret because its character position no longer matches the chip's visual position.
       queryHighlight.scrollLeft = 0;
       els.query.scrollLeft = 0;
-      els.query.style.caretColor = 'transparent';
+      els.query.style.caretColor = document.activeElement === els.query ? 'transparent' : '';
+      renderQueryCaret();
     } else {
       queryHighlight.scrollLeft = els.query.scrollLeft;
       els.query.style.caretColor = '';
     }
+  }
+
+  function renderQueryCaret() {
+    queryHighlight.querySelector('.query-caret')?.remove();
+    if (document.activeElement !== els.query || els.query.selectionStart !== els.query.selectionEnd) return;
+    const caret = els.query.selectionStart;
+    const chip = [...queryHighlight.querySelectorAll('.query-filter-chip')].find(el =>
+      caret >= Number(el.dataset.filterStart) && caret <= Number(el.dataset.filterEnd));
+    const target = chip?.querySelector('.query-filter') || [...queryHighlight.querySelectorAll('[data-query-start]')].find(el =>
+      caret >= Number(el.dataset.queryStart) && caret <= Number(el.dataset.queryEnd));
+    if (!target) return;
+
+    const start = Number(target.dataset.queryStart ?? chip.dataset.filterStart);
+    const end = Number(target.dataset.queryEnd ?? chip.dataset.filterEnd);
+    const isFolderChip = chip?.classList.contains('query-folder-chip');
+    const offset = isFolderChip ? Number.MAX_SAFE_INTEGER : Math.max(0, Math.min(caret - start, end - start));
+    const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    let remaining = offset;
+    let lastNode = node;
+    while (node && remaining > node.length) { remaining -= node.length; lastNode = node; node = walker.nextNode(); }
+    if (!node && isFolderChip) { node = lastNode; remaining = node?.length ?? 0; }
+    if (!node) return;
+
+    const range = document.createRange();
+    range.setStart(node, remaining);
+    range.collapse(true);
+    const rect = range.getBoundingClientRect();
+    const parent = queryHighlight.getBoundingClientRect();
+    if (!rect || !parent) return;
+    const marker = document.createElement('span');
+    marker.className = 'query-caret';
+    marker.setAttribute('aria-hidden', 'true');
+    marker.style.left = `${rect.left - parent.left + queryHighlight.scrollLeft}px`;
+    marker.style.top = `${rect.top - parent.top}px`;
+    queryHighlight.append(marker);
   }
 
   function removeFilterButton(match) {
@@ -1345,6 +1380,12 @@
     }, 120);
   });
   els.query.addEventListener('scroll', renderQueryHighlight);
+  els.query.addEventListener('select', renderQueryCaret);
+  els.query.addEventListener('keyup', renderQueryCaret);
+  els.query.addEventListener('click', renderQueryCaret);
+  els.query.addEventListener('focus', renderQueryHighlight);
+  els.query.addEventListener('blur', () => { els.query.style.caretColor = ''; queryHighlight.querySelector('.query-caret')?.remove(); });
+  document.addEventListener('selectionchange', renderQueryCaret);
   renderQueryHighlight();
 
   $('#btn-add-filter').addEventListener('click', openAddFilters);

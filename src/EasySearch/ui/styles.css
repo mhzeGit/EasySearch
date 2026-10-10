@@ -139,6 +139,15 @@ svg.i { flex: none; display: block; }
   overflow: hidden;
 }
 .query-highlight { z-index: 2; color: var(--text); pointer-events: none; }
+.query-caret {
+  position: absolute;
+  width: 1px;
+  height: 21px;
+  background: var(--accent);
+  pointer-events: none;
+  animation: query-caret-blink 1s steps(2, start) infinite;
+}
+@keyframes query-caret-blink { to { visibility: hidden; } }
 .query-filter-chip {
   display: inline-flex;
   align-items: center;
