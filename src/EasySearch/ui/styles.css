@@ -92,40 +92,39 @@ svg.i { flex: none; display: block; }
 }
 
 /* size: and type: become small forms under the text box. */
-.qchips { display: flex; flex-wrap: wrap; gap: 6px 8px; padding: 0 14px 10px 54px; }
+.qchips { display: flex; flex-wrap: wrap; gap: 5px 8px; padding: 0 14px 9px 54px; }
 .qchips[hidden] { display: none; }
 .qchip {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 3px 4px 3px 11px;
-  border-radius: 9px;
+  gap: 5px;
+  padding: 3px 3px 3px 10px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
   animation: pop .12s var(--ease);
 }
 .qchip:focus-within { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .qchip.invalid { box-shadow: inset 0 0 0 1.5px #f04438; }
-.qchip-label { color: color-mix(in srgb, var(--accent) 80%, var(--text)); font-weight: 600; font-size: 12px; letter-spacing: .02em; }
-.qchip-text { color: var(--text-3); font-size: 12px; }
+.qchip-label { color: color-mix(in srgb, var(--accent) 80%, var(--text)); font-weight: 600; font-size: 11.5px; letter-spacing: .02em; }
+.qchip-text { color: var(--text-3); font-size: 11.5px; }
 .qchip input, .qsel {
-  height: 26px;
+  height: 22px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 5px;
   background: var(--fill-strong);
   color: var(--text);
-  font-size: 12.5px;
+  font-size: 12px;
   min-width: 0;
 }
-.qsel { display: flex; align-items: center; gap: 5px; padding: 0 6px 0 9px; white-space: nowrap; }
+.qsel { display: flex; align-items: center; gap: 4px; padding: 0 5px 0 8px; white-space: nowrap; }
 .qsel svg { opacity: .6; }
 .qsel:hover, .qsel.open { background: color-mix(in srgb, var(--accent) 22%, var(--fill-strong)); }
-.qchip input { padding: 0 8px; cursor: text; user-select: text; }
+.qchip input { padding: 0 7px; cursor: text; user-select: text; }
 .qchip input::placeholder { color: var(--text-3); }
-.qchip input.num { width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
+.qchip input.num { width: 58px; text-align: right; font-variant-numeric: tabular-nums; }
 .qchip input.wide { width: 230px; }
-.qchip-x { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--text-2); }
+.qchip-x { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; color: var(--text-2); }
 .qchip-x:hover { background: var(--fill-strong); color: var(--text); }
 .suggest { min-width: 260px; max-height: 300px; }
 .suggest .menu-item { height: auto; min-height: 30px; padding-top: 4px; padding-bottom: 4px; }
