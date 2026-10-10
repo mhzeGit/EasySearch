@@ -82,7 +82,8 @@ window.createMockHost = () => {
     const terms = [];
     let extFilter = null, error = null;
     // The mock only understands the symbols, so spell the capitalised logic words that way.
-    const spelled = request.query.replace(/\s+OR\s+/g, '|').replace(/\bAND\s+/g, '').replace(/\bNOT\s+/g, '!');
+    const spelled = request.query.replace(/\s+(OR|or|\|\|)\s+/g, '|').replace(/\b(AND|and|&&)\s+/g, '')
+      .replace(/\bNOT\s+/g, '!').replace(/[()]/g, '');
     for (const token of spelled.toLowerCase().match(/"[^"]*"|\S+/g) || []) {
       const text = token.replace(/"/g, '');
       if (text.startsWith('ext:')) extFilter = text.slice(4).split(/[;,|]/);

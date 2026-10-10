@@ -51,7 +51,9 @@ dotnet publish src/EasySearch -c Release -r win-x64 --self-contained false -o pu
 | `report 2026` | names containing every word, in any order |
 | `jpg\|png` | either one |
 | `!draft`, `NOT draft` | everything except matches |
-| `report OR invoice` | either word (also `ext:pdf OR ext:docx`); `AND` is implied between terms |
+| `report OR invoice` | either word; `AND` is implied between terms (`report AND invoice`) |
+| `ext:pdf OR size:>10mb` | either condition — `OR` works between any filters |
+| `(ext:pdf OR ext:docx) AND draft` | parentheses group; `NOT (…)` excludes a whole group |
 | `"annual report"` | an exact phrase |
 | `*.log`, `img_????.jpg` | wildcards (match the whole name) |
 | `ext:pdf`, `ext:jpg;png`, `type:.pdf` | by extension (a dot after `type:` means a literal suffix) |
@@ -65,9 +67,14 @@ dotnet publish src/EasySearch -c Release -r win-x64 --self-contained false -o pu
 Operators combine freely: `type:image dm:30d size:>2mb !screenshot`, or in words,
 `holiday AND type:.jpg NOT draft`.
 
-`AND`, `OR` and `NOT` are only operators in capitals and outside quotes, so `cats and dogs` still
-searches for all three words. `OR` binds the two things next to it (`a OR b c` is "(a or b) and c")
-and works between two words or two filters of the same kind; it can't be mixed with `NOT`.
+`AND` and `OR` also work in lower case (and as `&&` / `||`), but only while the query still makes
+sense that way: `report or` or `to be or not to be` are searched as plain words. `NOT` must be in
+capitals (`!` always works) so a name like "do not disturb" never loses a word. Anything in quotes is
+plain text, and a parenthesis that does not pair up (`report (1`) is part of the name.
+
+`OR` binds the two things next to it more tightly than `AND` or a space (`a OR b c` is
+"(a or b) and c"), exactly like `a|b`; use parentheses for anything else. `NOT` can't be used with
+`size:`, `dm:` or `in:` — say the range you want instead (`size:<1mb`).
 
 ### Keys
 

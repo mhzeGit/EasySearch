@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace EasySearch.Core;
@@ -69,14 +68,41 @@ sealed class CompiledQuery
 }
 
 /// <summary>
-/// Turns the query text plus the UI filters into a <see cref="CompiledQuery"/>.
-/// Syntax: words are AND-ed, <c>a|b</c> is OR, <c>!word</c> negates, <c>"quoted phrase"</c>,
+/// Turns the query text plus the UI filters into <see cref="CompiledQuery"/> branches.
+/// Syntax: words are AND-ed, <c>a|b</c> or <c>a OR b</c> is OR (see <see cref="QueryLogic"/> for
+/// AND, NOT and parentheses), <c>!word</c> negates, <c>"quoted phrase"</c>,
 /// <c>*</c>/<c>?</c> wildcards, and operators such as <c>ext:</c>, <c>size:</c>, <c>dm:</c>,
 /// <c>type:</c>, <c>path:</c>, <c>in:</c> and <c>regex:</c>.
 /// </summary>
 static class QueryParser
 {
-    public static CompiledQuery Parse(SearchRequest request, DateTime now)
+    /// <summary>
+    /// One compiled query per OR branch; a document matches when any branch matches. Without OR or
+    /// parentheses (the usual case) there is exactly one.
+    /// </summary>
+    public static List<CompiledQuery> Parse(SearchRequest request, DateTime now)
+    {
+        var text = request.Query.Trim();
+        if (request.Regex)
+        {
+            var q = NewBranch(request);
+            if (text.Length > 0)
+                q.Terms.Add(new Term { OnPath = request.MatchPath, Alternatives = [RegexAlternative(text, q.IgnoreCase)] });
+            return [Finish(q)];
+        }
+
+        var branches = new List<CompiledQuery>();
+        foreach (var tokens in QueryLogic.Split(text))
+        {
+            var q = NewBranch(request);
+            foreach (var token in tokens) ParseToken(q, token, request.MatchPath, now);
+            branches.Add(Finish(q));
+        }
+        return branches;
+    }
+
+    /// <summary>A branch starts with everything the UI filters ask for; the query text adds to it.</summary>
+    static CompiledQuery NewBranch(SearchRequest request)
     {
         var q = new CompiledQuery
         {
@@ -93,117 +119,14 @@ static class QueryParser
         if (request.ModifiedAfter is { } after) { q.HasDate = true; q.ModifiedMin = PathUtil.FromUnixMs(after); }
         if (request.ModifiedBefore is { } before) { q.HasDate = true; q.ModifiedMax = PathUtil.FromUnixMs(before); }
         if (!string.IsNullOrWhiteSpace(request.Scope)) q.Scope = request.Scope;
-
-        var text = request.Query.Trim();
-        if (request.Regex)
-        {
-            if (text.Length > 0)
-                q.Terms.Add(new Term { OnPath = request.MatchPath, Alternatives = [RegexAlternative(text, q.IgnoreCase)] });
-        }
-        else
-        {
-            foreach (var token in ResolveWords(Tokenize(text))) ParseToken(q, token, request.MatchPath, now);
-        }
-
-        q.Primary = q.Terms.FindIndex(t =>
-            !t.Negate && !t.OnPath && t.Alternatives.Length == 1 && t.Alternatives[0].Kind == MatchKind.Substring);
         return q;
     }
 
-    /// <summary>
-    /// Splits on whitespace; double quotes keep spaces inside a token and are dropped (the token
-    /// remembers it was quoted, so a quoted "OR" stays a word).
-    /// </summary>
-    static List<(string Text, bool Quoted)> Tokenize(string text)
+    static CompiledQuery Finish(CompiledQuery q)
     {
-        var tokens = new List<(string, bool)>();
-        var current = new StringBuilder();
-        bool inQuotes = false, hadQuotes = false;
-        foreach (char c in text)
-        {
-            if (c == '"') { inQuotes = !inQuotes; hadQuotes = true; continue; }
-            if (char.IsWhiteSpace(c) && !inQuotes)
-            {
-                if (current.Length > 0) { tokens.Add((current.ToString(), hadQuotes)); current.Clear(); }
-                hadQuotes = false;
-                continue;
-            }
-            current.Append(c);
-        }
-        if (current.Length > 0) tokens.Add((current.ToString(), hadQuotes));
-        return tokens;
-    }
-
-    static readonly HashSet<string> OperatorKeys = new(StringComparer.OrdinalIgnoreCase)
-        { "ext", "type", "kind", "folder", "folders", "file", "files", "size", "dm", "modified", "date", "datemodified",
-          "in", "under", "parent", "path", "name", "regex" };
-
-    /// <summary>Operators whose values are lists, so <c>a OR b</c> can become <c>key:a|b</c>.</summary>
-    static readonly HashSet<string> JoinableKeys = new(StringComparer.OrdinalIgnoreCase) { "ext", "type", "kind", "path", "name" };
-
-    /// <summary>
-    /// Turns the upper-case words AND, OR and NOT into the symbols the rest of the parser knows:
-    /// AND is already implied between terms, <c>NOT x</c> becomes <c>!x</c> and <c>a OR b</c> becomes
-    /// <c>a|b</c> (or <c>ext:a|b</c> between two filters of the same kind). Quoted words and lower-case
-    /// "and"/"or"/"not" stay plain text, so names such as "cats and dogs" still search as before.
-    /// </summary>
-    static List<string> ResolveWords(List<(string Text, bool Quoted)> tokens)
-    {
-        var result = new List<string>();
-        bool negate = false, or = false;
-        foreach (var (text, quoted) in tokens)
-        {
-            if (!quoted)
-            {
-                if (text == "AND") continue;
-                if (text == "NOT") { negate = !negate; continue; }
-                if (text == "OR")
-                {
-                    if (result.Count == 0 || or) throw new FormatException("OR needs a word on both sides, e.g. report OR invoice");
-                    or = true;
-                    continue;
-                }
-            }
-
-            var token = text;
-            if (negate) token = text.StartsWith('!') ? text[1..] : "!" + text;
-            negate = false;
-
-            if (or)
-            {
-                result[^1] = JoinAlternatives(result[^1], token);
-                or = false;
-            }
-            else
-            {
-                result.Add(token);
-            }
-        }
-        if (or) throw new FormatException("OR needs a word on both sides, e.g. report OR invoice");
-        if (negate) throw new FormatException("NOT needs a word after it, e.g. report NOT draft");
-        return result;
-    }
-
-    static string JoinAlternatives(string left, string right)
-    {
-        const string hint = "OR works between two words, or two filters of the same kind such as ext:pdf OR ext:docx";
-        if (left.StartsWith('!') || right.StartsWith('!'))
-            throw new FormatException("OR can't be combined with NOT. " + hint);
-
-        var leftKey = KeyOf(left);
-        if (leftKey != KeyOf(right) || (leftKey is not null && !JoinableKeys.Contains(leftKey)))
-            throw new FormatException(hint);
-
-        // Same operator on both sides: keep one "key:" and list the values.
-        var rightValue = leftKey is null ? right : right[(right.IndexOf(':') + 1)..];
-        return left + "|" + rightValue;
-    }
-
-    /// <summary>The operator a token starts with ("ext" for "ext:pdf"), or null for plain text.</summary>
-    static string? KeyOf(string token)
-    {
-        int colon = token.IndexOf(':');
-        return colon > 0 && OperatorKeys.Contains(token[..colon]) ? token[..colon].ToLowerInvariant() : null;
+        q.Primary = q.Terms.FindIndex(t =>
+            !t.Negate && !t.OnPath && t.Alternatives.Length == 1 && t.Alternatives[0].Kind == MatchKind.Substring);
+        return q;
     }
 
     static void ParseToken(CompiledQuery q, string token, bool matchPath, DateTime now)
@@ -234,18 +157,21 @@ static class QueryParser
                     return;
 
                 case "size":
+                    if (negate) throw NotUnsupported(key);
                     if (!TryParseSize(value, ref q.SizeMin, ref q.SizeMax))
                         throw new FormatException($"Can't read size \"{value}\". Try size:>10mb or size:1mb..1gb");
                     q.HasSize = true;
                     return;
 
                 case "dm" or "modified" or "date" or "datemodified":
+                    if (negate) throw NotUnsupported(key);
                     if (!TryParseDate(value, now, ref q.ModifiedMin, ref q.ModifiedMax))
                         throw new FormatException($"Can't read date \"{value}\". Try dm:today, dm:7d or dm:>2026-01-01");
                     q.HasDate = true;
                     return;
 
                 case "in" or "under" or "parent":
+                    if (negate) throw NotUnsupported(key);
                     if (value.Length > 0) q.Scope = value;
                     return;
 
@@ -267,6 +193,9 @@ static class QueryParser
         // Not an operator ("C:\Users" lands here too): plain text.
         AddTextTerm(q, token, negate, matchPath, forceName: false);
     }
+
+    static FormatException NotUnsupported(string key) =>
+        new($"NOT can't be used with {key}:. Describe the range you want instead, e.g. size:<1mb or dm:>2026-01-01");
 
     static void AddTextTerm(CompiledQuery q, string text, bool negate, bool onPath, bool forceName)
     {

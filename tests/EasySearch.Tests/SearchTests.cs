@@ -97,23 +97,82 @@ public sealed class SearchTests : IDisposable
         Assert.Equal(["holiday.png"], Names("type:image NOT img"));
         Assert.Equal(Names("annual|holiday type:file"), Names("annual OR holiday AND type:file"));
 
-        // Quoted and lower-case words are just words, not operators.
+        // A quoted word is just a word, and a dangling operator is an error.
         Assert.Equal(Names("or"), Names("\"OR\""));
-        Assert.Equal(Names("or"), Names("or"));
-        Assert.NotEqual(Names("annual"), Names("annual and"));
-        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "annual OR" }).Error);
-        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "OR annual" }).Error);
-        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "annual NOT" }).Error);
-        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "ext:pdf OR annual" }).Error);
-        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "size:<1kb OR size:>1mb" }).Error);
+        Assert.NotNull(Error("annual OR"));
+        Assert.NotNull(Error("OR annual"));
+        Assert.NotNull(Error("annual AND OR holiday"));
+        Assert.NotNull(Error("annual NOT"));
 
         // size:min-max, with the unit allowed once, and in either order.
         var between = Names("size:10kb..1mb");
         Assert.Equal(between, Names("size:10kb-1mb"));
         Assert.Equal(between, Names("size:1mb-10kb"));
         Assert.Equal(Names("size:10kb..1000kb"), Names("size:10-1000kb"));
-        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "size:abc-def" }).Error);
+        Assert.NotNull(Error("size:abc-def"));
     }
+
+    [Fact]
+    public void Or_between_any_filters_and_grouping()
+    {
+        static string[] Sorted(IEnumerable<string> names) => [.. names.Order(StringComparer.Ordinal)];
+
+        // OR is not limited to words or one kind of filter.
+        Assert.Equal(Sorted(Names("ext:pdf").Union(Names("annual"))), Sorted(Names("ext:pdf OR annual")));
+        Assert.Equal(Sorted(Names("size:empty").Union(Names("size:>3mb"))), Sorted(Names("size:empty OR size:>3mb")));
+        Assert.Equal(Sorted(Names("ext:png").Union(Names("size:empty"))), Sorted(Names("ext:png || size:empty")));
+
+        // Parentheses decide what the OR covers.
+        Assert.Equal(["annual report draft.docx"], Names("(ext:pdf OR ext:docx) AND draft"));
+        Assert.Equal(["annual report draft.docx", "holiday.png"], Sorted(Names("ext:png OR (ext:docx AND annual)")));
+        Assert.Equal(["holiday.png"], Names("ext:png OR (ext:docx AND zzz)"));
+        Assert.Equal(Names("type:document !ext:pdf,docx"), Names("type:document NOT (ext:pdf OR ext:docx)"));
+
+        // NOT over a group flips AND to OR (De Morgan): everything except "a pdf that is also annual".
+        var notAnnualPdf = Names("type:document NOT (ext:pdf AND annual)");
+        Assert.DoesNotContain("Annual Report 2025.pdf", notAnnualPdf);
+        Assert.Contains("annual report draft.docx", notAnnualPdf);
+
+        // Filters from the UI apply to every branch; each branch can carry its own scope.
+        Assert.Equal(["IMG_0001.JPG", "IMG_0002.jpg"], Names("size:>1mb OR zzz", r => { r.Kind = "image"; r.Scope = Path.Combine(_root, "photos"); }));
+        Assert.Equal(["annual report draft.docx"], Names("ext:docx OR ext:log OR ext:png", r => r.Extensions = "docx"));
+
+        // Each branch can carry its own folder: .cs files in src, or anything png in photos.
+        var src = Path.Combine(_root, "src");
+        var docs = Path.Combine(_root, "docs");
+        Assert.Equal(Sorted(Names($"in:\"{src}\" ext:cs").Union(Names($"in:\"{docs}\" ext:docx"))),
+            Sorted(Names($"(in:\"{src}\" ext:cs) OR (in:\"{docs}\" ext:docx)")));
+    }
+
+    [Fact]
+    public void Lower_case_words_and_stray_parentheses_fall_back_to_plain_text()
+    {
+        // and / or work in lower case, as does && ...
+        Assert.Equal(Names("annual report"), Names("annual and report"));
+        Assert.Equal(Names("annual OR holiday"), Names("annual or holiday"));
+        Assert.Equal(Names("annual report"), Names("annual && report"));
+
+        // ... but only while that makes sense; otherwise the words are searched for as written.
+        Assert.Equal(Names("report \"or\""), Names("report or"));
+        Assert.Null(Error("report or"));
+        // NOT must be capitalised, so "do not disturb" can never silently drop a word.
+        Assert.Empty(Names("type:image not img"));
+        Assert.NotEmpty(Names("type:image NOT img"));
+
+        // A lone parenthesis, or one wrapped round a single word, is part of a name.
+        Assert.Null(Error("(annual"));
+        Assert.Null(Error("annual)"));
+        Assert.Empty(Names("(annual)"));
+        Assert.NotEmpty(Names("(annual OR holiday)"));
+
+        Assert.NotNull(Error("NOT size:>1mb"));
+
+        // (a OR b) (c OR d) ... multiplies out; keep it bounded.
+        var groups = string.Join(' ', Enumerable.Repeat("(ext:pdf OR size:>1mb)", 6));
+        Assert.NotNull(Error(groups));
+    }
+
+    string? Error(string query) => SearchEngine.Run(_index, new SearchRequest { Query = query }).Error;
 
     [Fact]
     public void Custom_extension_filter()

@@ -185,10 +185,17 @@
   function highlightTerms(query) {
     if (state.options.regex) return [];
     const terms = [];
-    let negated = false;
+    let negated = false, excluded = 0; // excluded: how many ( deep we are inside a NOT (...)
     for (const token of query.match(/"[^"]*"|\S+/g) || []) {
       let text = token.replace(/"/g, '');
-      if (!token.startsWith('"') && /^(AND|OR|NOT)$/.test(text)) { negated = text === 'NOT'; continue; } // logic words, not names
+      if (!token.includes('"')) {
+        if (/^(and|or|not|&&|\|\||\|)$/i.test(text)) { negated = text === 'NOT'; continue; } // logic words, not names
+        const opens = text.match(/^\(*/)[0].length, closes = text.match(/\)*$/)[0].length;
+        text = text.replace(/^\(+/, '').replace(/\)+$/, '');
+        if (excluded > 0) { excluded += opens - closes; if (excluded < 0) excluded = 0; continue; }
+        if (negated && opens > 0) { negated = false; excluded = Math.max(0, opens - closes); continue; }
+        if (!text) continue;
+      }
       if (negated) { negated = false; continue; } // the word after NOT is excluded, not matched
       if (text.startsWith('!')) continue;
       if (/^(ext|type|kind|size|dm|modified|date|datemodified|in|under|parent|path|regex|folders?|files?):/i.test(text)) continue;
@@ -501,6 +508,7 @@
     ['jpg|png', 'Either one'],
     ['!draft', 'Leave matches out — or NOT draft'],
     ['report OR invoice', 'Either word; AND is implied'],
+    ['ext:pdf OR (ext:docx AND draft)', 'OR, AND and (groups) work between any filters'],
     ['"annual report"', 'An exact phrase'],
     ['*.log', 'Wildcards'],
     ['type:.pdf', 'By suffix — or ext:pdf'],

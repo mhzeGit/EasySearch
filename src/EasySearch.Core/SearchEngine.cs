@@ -46,20 +46,28 @@ public static class SearchEngine
     public static SearchResult Run(FileIndex index, SearchRequest request, CancellationToken cancel = default)
     {
         var timer = Stopwatch.StartNew();
-        CompiledQuery query;
+        List<CompiledQuery> branches;
         try
         {
-            query = QueryParser.Parse(request, DateTime.Now);
+            branches = QueryParser.Parse(request, DateTime.Now);
         }
         catch (FormatException e)
         {
             return new SearchResult { Error = e.Message };
         }
+        var query = branches[0]; // the branches share everything but their terms and filters
 
         var snapshot = index.Snapshot();
         if (snapshot.Count == 0) return new SearchResult { ElapsedMs = timer.Elapsed.TotalMilliseconds };
 
-        bool[]? scope = query.Scope is null ? null : index.BuildScopeMask(query.Scope, snapshot);
+        var scopes = new Dictionary<string, bool[]>(StringComparer.OrdinalIgnoreCase);
+        var scopeMasks = new bool[]?[branches.Count];
+        for (int b = 0; b < branches.Count; b++)
+        {
+            if (branches[b].Scope is not { } folder) continue;
+            if (!scopes.TryGetValue(folder, out var mask)) scopes[folder] = mask = index.BuildScopeMask(folder, snapshot);
+            scopeMasks[b] = mask;
+        }
 
         var sort = request.Sort.ToLowerInvariant() switch
         {
@@ -70,7 +78,7 @@ public static class SearchEngine
             _ => SortKey.Relevance,
         };
         bool descending = request.Desc;
-        if (sort == SortKey.Relevance && query.Primary < 0)
+        if (sort == SortKey.Relevance && branches.All(b => b.Primary < 0))
         {
             // Nothing to rank by (filters only): newest first is the most useful order.
             sort = SortKey.Modified;
@@ -80,9 +88,11 @@ public static class SearchEngine
         int limit = Math.Clamp(request.Limit, 1, MaxLimit);
         var ranking = new Ranking(snapshot, sort, descending);
         var worstFirst = Comparer<Hit>.Create((a, b) => ranking.Compare(b, a));
-        var matcher = new Matcher(snapshot, query, scope, sort == SortKey.Relevance);
+        var matcher = new Matcher(
+            [.. branches.Select((b, i) => new BranchMatcher(snapshot, b, scopeMasks[i], sort == SortKey.Relevance))]);
 
-        string? driver = FindDriver(query);
+        // With OR branches there is no single piece of text every match must contain.
+        string? driver = branches.Count == 1 ? FindDriver(query) : null;
 
         var best = new List<Hit>();
         long total = 0;
@@ -234,7 +244,26 @@ public static class SearchEngine
         }
     }
 
-    sealed class Matcher(IndexSnapshot snapshot, CompiledQuery query, bool[]? scope, bool score)
+    /// <summary>Matches when any OR branch does; the best branch's relevance wins.</summary>
+    sealed class Matcher(BranchMatcher[] branches)
+    {
+        public bool IsMatch(int i, Local local, out int relevance)
+        {
+            if (branches.Length == 1) return branches[0].IsMatch(i, local, out relevance);
+
+            relevance = 0;
+            bool matched = false;
+            foreach (var branch in branches)
+            {
+                if (!branch.IsMatch(i, local, out int branchRelevance)) continue;
+                if (!matched || branchRelevance > relevance) relevance = branchRelevance;
+                matched = true;
+            }
+            return matched;
+        }
+    }
+
+    sealed class BranchMatcher(IndexSnapshot snapshot, CompiledQuery query, bool[]? scope, bool score)
     {
         readonly Term[] _terms = [.. query.Terms];
         readonly HashSet<string>[] _required = [.. query.RequiredExtensions];
