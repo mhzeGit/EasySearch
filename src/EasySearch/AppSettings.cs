@@ -7,6 +7,7 @@ namespace EasySearch;
 public sealed class AppSettings
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    const int CurrentExclusionsVersion = 1;
     const int CurrentSettingsVersion = 1;
 
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
@@ -39,6 +40,7 @@ public sealed class AppSettings
     public List<string> Roots { get; set; } = [];
     /// <summary>Folder names (anywhere) or full folder paths left out of the index.</summary>
     public List<string> Excluded { get; set; } = [];
+    public int ExclusionsVersion { get; set; }
 
     public bool ShowHidden { get; set; }
     public bool ShowSystem { get; set; }
@@ -69,6 +71,14 @@ public sealed class AppSettings
             settings.SettingsVersion = CurrentSettingsVersion;
             settings.Save();
         }
+        if (settings.ExclusionsVersion < CurrentExclusionsVersion)
+        {
+            settings.Excluded ??= [];
+            if (!settings.Excluded.Contains("AppData", StringComparer.OrdinalIgnoreCase)) settings.Excluded.Add("AppData");
+            if (!settings.Excluded.Contains("Temp", StringComparer.OrdinalIgnoreCase)) settings.Excluded.Add("Temp");
+            settings.ExclusionsVersion = CurrentExclusionsVersion;
+            settings.Save();
+        }
         if (settings.Roots.Count == 0) settings.Roots = DefaultRoots();
         return settings;
     }
@@ -96,6 +106,8 @@ public sealed class AppSettings
         [
             "$Recycle.Bin",
             "System Volume Information",
+            "AppData",
+            "Temp",
             "node_modules",
             ".git",
             Path.Combine(windows, "WinSxS"),
