@@ -805,7 +805,38 @@
       });
     }
 
-    els.list.innerHTML = html;
+    if (state.items.length > 0 && !state.pending && !state.error) {
+      // Search results often arrive in several partial batches. Replacing the whole list for each
+      // batch makes WebView2 briefly clear and reload every row (including its shell icons), which
+      // looks like a flash. Reuse rows with the same path and only rebuild rows whose data changed.
+      const existing = new Map([...els.list.querySelectorAll('.row[data-key]')].map(row => [row.dataset.key, row]));
+      const fragment = document.createDocumentFragment();
+      state.items.forEach((item, index) => {
+        const key = pathOf(item);
+        const signature = JSON.stringify(item);
+        let row = existing.get(key);
+        if (row && row.dataset.signature === signature) {
+          existing.delete(key);
+        } else {
+          const holder = document.createElement('div');
+          const terms = highlightTerms(state.query);
+          holder.innerHTML = `<div class="row${index === state.selected ? ' sel' : ''}${item.hidden ? ' dim' : ''}" data-i="${index}" data-key="${esc(key)}" data-signature="${esc(signature)}" role="option">
+            ${rowIcon(item)}
+            <span class="row-main"><span class="row-name">${highlight(item.name, terms)}</span><span class="row-path">${breadcrumb(item.dir)}</span></span>
+            <span class="row-meta"><b>${formatDate(item.modified)}</b><span>${item.isDir ? 'Folder' : formatSize(item.size)}</span></span>
+          </div>`;
+          const replacement = holder.firstElementChild;
+          if (row) { row.replaceWith(replacement); row = replacement; existing.delete(key); }
+          else row = replacement;
+        }
+        row.dataset.i = index;
+        row.classList.toggle('sel', index === state.selected);
+        fragment.append(row);
+      });
+      els.list.replaceChildren(fragment);
+    } else if (els.list.innerHTML !== html) {
+      els.list.innerHTML = html;
+    }
     els.list.scrollTop = keepScroll ? scrollTop : 0;
     renderPreview();
     renderHints();
@@ -866,11 +897,14 @@
   ];
 
   let previewTimer = 0;
+  let renderedPreviewKey = null;
 
   function renderPreview() {
     if (!state.settings?.showPreview) return;
     const item = selectedItem();
     if (!item || item.command) {
+      if (renderedPreviewKey === 'tips') return;
+      renderedPreviewKey = 'tips';
       els.preview.innerHTML = `
         <div class="tips-title">Search like a pro</div>
         <div class="tips-sub">Click an example to try it.</div>
@@ -879,6 +913,9 @@
     }
 
     const path = pathOf(item);
+    const previewKey = `${path}\0${item.modified}\0${item.size}`;
+    if (renderedPreviewKey === previewKey) return;
+    renderedPreviewKey = previewKey;
     const kind = kindOf(item);
     const visual = kind === 'image' || kind === 'video' || extOf(item.name) === 'pdf';
     const hero = inHost
