@@ -67,6 +67,16 @@ public sealed partial class MainForm
 
         switch (Text("type"))
         {
+            case "drag":
+                // The user pressed the mouse on an empty part of the search bar: let Windows move the window.
+                Native.ReleaseCapture();
+                Native.PostMessageW(Handle, Native.WM_SYSCOMMAND, Native.SC_DRAGMOVE, IntPtr.Zero);
+                break;
+
+            case "painted":
+                Trace($"show: interface drawn {_showTimer.Elapsed.TotalMilliseconds:F0} ms after the key press");
+                break;
+
             case "scale":
                 SetUiScale(message.GetProperty("value").GetDouble());
                 break;

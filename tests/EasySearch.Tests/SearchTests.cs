@@ -165,10 +165,14 @@ public sealed class SearchTests : IDisposable
         Assert.Null(FileIndex.TryLoad(file, "another scope"));
     }
 
-    [Fact]
-    public void Live_changes_are_picked_up()
+    /// <summary>Once with the NTFS change journal, once with file system notifications (the fallback for other drives).</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Live_changes_are_picked_up(bool useJournal)
     {
-        using var service = new IndexService(Path.Combine(_root, "live.bin"));
+        var cache = Path.Combine(Path.GetTempPath(), "EasySearchTests", Path.GetFileName(_root) + "-live.bin");
+        using var service = new IndexService(cache, useJournal);
         service.Start(Scope());
         WaitFor(() => !service.Status.Indexing && service.Index.LiveCount > 0);
 
@@ -198,6 +202,65 @@ public sealed class SearchTests : IDisposable
         Write(@"docs\marker.txt", 1, daysOld: 0);
         WaitFor(() => Live("marker.txt").Length == 1);
         Assert.Empty(Live("late.js"));
+
+        Assert.Equal(1, service.FullScans); // all of the above without scanning again
+        Assert.Equal(0, service.LocationScans);
+        File.Delete(cache);
+    }
+
+    [Fact]
+    public void Restart_catches_up_from_the_journal_without_rescanning()
+    {
+        var cache = Path.Combine(Path.GetTempPath(), "EasySearchTests", Path.GetFileName(_root) + "-restart.bin");
+        using (var first = new IndexService(cache))
+        {
+            first.Start(Scope());
+            WaitFor(() => !first.Status.Indexing && first.Index.LiveCount > 0);
+            Assert.Equal(1, first.FullScans);
+        }
+
+        // While the app is "closed": add, change, rename and delete things.
+        Write(@"docs\written-while-closed.txt", 5, daysOld: 0);
+        Write(@"new-folder\deep\inside.md", 5, daysOld: 0);
+        File.WriteAllBytes(Path.Combine(_root, @"docs\notes.txt"), new byte[4321]);
+        File.Move(Path.Combine(_root, @"photos\holiday.png"), Path.Combine(_root, @"photos\beach.png"));
+        File.Delete(Path.Combine(_root, @"src\app\README.md"));
+        Directory.Delete(Path.Combine(_root, @"src\app"), recursive: true);
+
+        using var second = new IndexService(cache);
+        second.Start(Scope());
+        string[] Live(string query) => Names(query, index: second.Index);
+        WaitFor(() => !second.Status.Indexing && Live("written-while-closed").Length == 1);
+
+        Assert.Equal(["inside.md"], Live(@"new-folder\deep\ type:file"));
+        Assert.Equal(["notes.txt"], Live("notes size:4321..4321"));
+        Assert.Equal(["beach.png"], Live("beach|holiday"));
+        Assert.Empty(Live("program.cs|readme.md"));
+        Assert.Empty(Live(@"path:src\app"));
+        Assert.Equal(0, second.FullScans);
+        Assert.Equal(0, second.LocationScans);
+        File.Delete(cache);
+    }
+
+    [Fact]
+    public void A_location_can_be_refreshed_in_place_and_the_index_compacted()
+    {
+        int before = _index.LiveCount;
+        Write(@"docs\added-later.txt", 1, daysOld: 0);
+        File.Delete(Path.Combine(_root, @"photos\holiday.png"));
+
+        var root = PathUtil.Normalize(_root);
+        _index.ReplaceRoot(root, IndexBuilder.BuildRoot(Scope(), root));
+        Assert.Equal(before, _index.LiveCount); // one added, one removed
+        Assert.Equal(["added-later.txt"], Names("added-later"));
+        Assert.Empty(Names("holiday"));
+        Assert.Equal(["Program.cs"], Names(@"src\app\ .cs"));
+
+        var compact = _index.Compact();
+        Assert.Equal(0, compact.DeadCount);
+        Assert.Equal(before, compact.LiveCount);
+        Assert.Equal(Names("type:file"), Names("type:file", index: compact));
+        Assert.Equal(Names("report-cache", r => r.ShowHidden = true), Names("report-cache", r => r.ShowHidden = true, index: compact));
     }
 
     static void WaitFor(Func<bool> condition)

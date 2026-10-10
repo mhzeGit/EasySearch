@@ -25,7 +25,7 @@ public sealed class AppSettings
     /// <summary>system, light or dark.</summary>
     public string Theme { get; set; } = "system";
     public string Accent { get; set; } = "#0a84ff";
-    public string Hotkey { get; set; } = "Alt+Space";
+    public string Hotkey { get; set; } = "Win+Space";
     public bool HideOnBlur { get; set; } = true;
     public bool LaunchAtLogin { get; set; }
     public bool ShowPreview { get; set; } = true;

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Enumeration;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 
 namespace EasySearch.Core;
@@ -168,6 +169,7 @@ public static class SearchEngine
     /// runs a single vectorized search for <paramref name="driver"/> across the buffer and only
     /// evaluates the entries it lands in.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     static void ScanNames(IndexSnapshot snapshot, int from, int to, string driver, StringComparison comparison, Matcher matcher, Local local)
     {
         var names = snapshot.Names;
@@ -242,6 +244,8 @@ public static class SearchEngine
             | (query.ShowHidden ? 0 : EntryFlags.Hidden | EntryFlags.HiddenTree)
             | (query.ShowSystem ? 0 : EntryFlags.System);
 
+        // Compiled fully on first use, so the first search after start is as fast as the rest.
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
         public bool IsMatch(int i, Local local, out int relevance)
         {
             relevance = 0;

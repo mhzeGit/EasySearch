@@ -6,9 +6,12 @@ static class Native
 {
     public const int WM_NCCALCSIZE = 0x0083;
     public const int WM_HOTKEY = 0x0312;
+    public const int WM_SYSCOMMAND = 0x0112;
+    public const int SC_DRAGMOVE = 0xF012; // SC_MOVE as if the title bar had been grabbed
     public const int WS_EX_TOOLWINDOW = 0x00000080;
     public const int WS_CLIPCHILDREN = 0x02000000;
 
+    public const int DWMWA_CLOAK = 13;
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
     public const int DWMWA_BORDER_COLOR = 34;
@@ -68,6 +71,27 @@ static class Native
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr processId);
+
+    [DllImport("kernel32.dll")]
+    public static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    public static extern bool AttachThreadInput(uint thread, uint attachTo, bool attach);
+
+    [DllImport("user32.dll")]
+    public static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    public static extern bool PostMessageW(IntPtr hWnd, int message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
 
     [DllImport("dwmapi.dll")]
     public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);

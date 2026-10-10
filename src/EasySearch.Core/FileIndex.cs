@@ -38,6 +38,16 @@ public sealed class PendingChange
     public EntryFlags Flags;
 }
 
+/// <summary>What one folder contains on disk right now, to be reconciled with the index.</summary>
+public sealed class FolderSnapshot
+{
+    /// <summary>The folder's entry in the index.</summary>
+    public required int Index;
+    public required string Path;
+    public required char[] Names;
+    public required RawEntry[] Entries;
+}
+
 /// <summary>
 /// A consistent, lock-free view of the index. Entries are append-only, so everything below
 /// <see cref="Count"/> stays valid even while the index keeps growing.
@@ -106,7 +116,7 @@ public readonly struct IndexSnapshot
 public sealed class FileIndex
 {
     const int Magic = 0x58495345; // "ESIX"
-    const int FormatVersion = 1;
+    const int FormatVersion = 2;
 
     readonly object _gate = new();
     readonly Dictionary<DirKey, int> _dirs = new(DirKeyComparer.Instance);
@@ -131,6 +141,18 @@ public sealed class FileIndex
 
     public int Count => Volatile.Read(ref _count);
     public int LiveCount => Volatile.Read(ref _live);
+
+    /// <summary>Entries that were removed but still occupy space until the index is compacted.</summary>
+    public int DeadCount => Count - LiveCount;
+
+    /// <summary>
+    /// Per volume ("C:"): the change-journal position this index is up to date with. Persisted
+    /// with the cache so the next start can continue from there. Owned by <see cref="IndexService"/>.
+    /// </summary>
+    public Dictionary<string, (long JournalId, long Position)> Checkpoints { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Per location: when it was last scanned in full (UTC ticks).</summary>
+    public Dictionary<string, long> RootScanTimes { get; } = new(StringComparer.OrdinalIgnoreCase);
     public long Version => Interlocked.Read(ref _version);
 
     public IndexSnapshot Snapshot()
@@ -359,24 +381,184 @@ public sealed class FileIndex
                     if (!c.Exists) continue;
 
                     int index = AppendLocked(c.Parent, c.Name, c.Size, c.Modified, c.Flags);
-                    // Links are listed but never followed.
-                    if (isDirectory && (c.Flags & EntryFlags.Reparse) == 0) newDirectories.Add((c.FullPath, index));
+                    if (isDirectory) newDirectories.Add((c.FullPath, index));
                 }
             }
 
-            if (sweep)
-            {
-                // Children come after their parent, so one forward pass removes whole subtrees.
-                for (int i = 0; i < _count; i++)
-                {
-                    int p = _parent[i];
-                    if (p >= 0 && (_flags[i] & EntryFlags.Deleted) == 0 && (_flags[p] & EntryFlags.Deleted) != 0)
-                        KillLocked(i);
-                }
-            }
+            if (sweep) SweepLocked();
             _version++;
         }
         return newDirectories;
+    }
+
+    /// <summary>
+    /// Makes the index match what the given folders contain on disk: adds what is new, updates
+    /// sizes and dates, and removes what is gone. Returns folders that are new to the index and
+    /// still need their contents scanned.
+    /// </summary>
+    public List<(string Path, int Index)> SyncFolders(IReadOnlyList<FolderSnapshot> folders, out bool changed)
+    {
+        var newDirectories = new List<(string, int)>();
+        changed = false;
+        if (folders.Count == 0) return newDirectories;
+
+        lock (_gate)
+        {
+            // Collect what the index currently holds in each of these folders, in one pass.
+            var known = new Dictionary<int, Dictionary<string, int>>();
+            var touched = new bool[_count];
+            foreach (var folder in folders)
+            {
+                if ((uint)folder.Index >= (uint)_count || known.ContainsKey(folder.Index)) continue;
+                known[folder.Index] = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                touched[folder.Index] = true;
+            }
+
+            bool sweep = false;
+            for (int i = 0; i < _count; i++)
+            {
+                int p = _parent[i];
+                if (p < 0 || !touched[p] || (_flags[i] & EntryFlags.Deleted) != 0) continue;
+                var name = new string(_names, _nameStart[i], _nameLength[i]);
+                if (known[p].TryGetValue(name, out int duplicate))
+                {
+                    sweep |= (_flags[duplicate] & EntryFlags.Directory) != 0;
+                    KillLocked(duplicate);
+                    changed = true;
+                }
+                known[p][name] = i;
+            }
+
+            foreach (var folder in folders)
+            {
+                if (!known.Remove(folder.Index, out var existing)) continue; // listed twice, or out of range
+                var folderFlags = _flags[folder.Index];
+                if ((folderFlags & EntryFlags.Deleted) != 0 || (folderFlags & EntryFlags.Directory) == 0) continue;
+
+                var lookup = existing.GetAlternateLookup<ReadOnlySpan<char>>();
+                foreach (ref readonly var e in folder.Entries.AsSpan())
+                {
+                    var name = folder.Names.AsSpan(e.NameStart, e.NameLength);
+                    bool isDirectory = (e.Flags & EntryFlags.Directory) != 0;
+                    if (lookup.Remove(name, out _, out int i))
+                    {
+                        bool wasDirectory = (_flags[i] & EntryFlags.Directory) != 0;
+                        if (wasDirectory == isDirectory)
+                        {
+                            var flags = e.Flags | (_flags[i] & EntryFlags.HiddenTree);
+                            if (_size[i] != e.Size || _modified[i] != e.Modified || _flags[i] != flags)
+                            {
+                                _size[i] = e.Size;
+                                _modified[i] = e.Modified;
+                                _flags[i] = flags;
+                                changed = true;
+                            }
+                            continue;
+                        }
+                        KillLocked(i);
+                        sweep |= wasDirectory;
+                    }
+
+                    int index = AppendLocked(folder.Index, name, e.Size, e.Modified, e.Flags);
+                    changed = true;
+                    if (isDirectory) newDirectories.Add((string.Concat(folder.Path, "\\", name), index));
+                }
+
+                foreach (int gone in existing.Values)
+                {
+                    sweep |= (_flags[gone] & EntryFlags.Directory) != 0;
+                    KillLocked(gone);
+                    changed = true;
+                }
+            }
+
+            if (sweep) SweepLocked();
+            if (changed) _version++;
+        }
+        return newDirectories;
+    }
+
+    /// <summary>
+    /// Swaps the contents of one location for a freshly scanned copy (an index built with
+    /// <see cref="IndexBuilder.BuildRoot"/>). Everything else in the index is left alone.
+    /// </summary>
+    public void ReplaceRoot(string rootPath, FileIndex fresh)
+    {
+        var source = fresh.Snapshot();
+        if (source.Count == 0) return; // location was unavailable: keep what we have
+
+        lock (_gate)
+        {
+            int rootIndex = -1;
+            foreach (var (path, index) in _roots)
+                if (string.Equals(path, rootPath, StringComparison.OrdinalIgnoreCase)) rootIndex = index;
+            if (rootIndex < 0)
+            {
+                rootIndex = AppendLocked(-1, rootPath, 0, source.Modified[0], EntryFlags.Directory);
+                _roots.Add((rootPath, rootIndex));
+            }
+
+            // Drop the old contents: everything whose chain of parents leads to this root.
+            var below = new bool[_count];
+            for (int i = rootIndex + 1; i < below.Length; i++)
+            {
+                int p = _parent[i];
+                if (p < 0 || !(p == rootIndex || below[p])) continue;
+                below[i] = true;
+                if ((_flags[i] & EntryFlags.Deleted) == 0) KillLocked(i);
+            }
+
+            // Append the new contents. Parents come before children, so their new index is already known.
+            EnsureCapacity(_count + source.Count, _namesLength + source.NamesLength);
+            var moved = new int[source.Count];
+            moved[0] = rootIndex;
+            for (int i = 1; i < source.Count; i++)
+            {
+                int p = source.Parent[i] < 0 ? -1 : moved[source.Parent[i]];
+                moved[i] = p < 0 || (source.Flags[i] & EntryFlags.Deleted) != 0
+                    ? -1
+                    : AppendLocked(p, source.Name(i), source.Size[i], source.Modified[i], source.Flags[i] & ~EntryFlags.HiddenTree);
+            }
+            _modified[rootIndex] = source.Modified[0];
+            _version++;
+        }
+    }
+
+    /// <summary>A copy of this index without the removed entries.</summary>
+    public FileIndex Compact()
+    {
+        lock (_gate)
+        {
+            var compact = new FileIndex(Signature);
+            compact.EnsureCapacity(_live + 1024, _namesLength);
+
+            var moved = new int[_count];
+            for (int i = 0; i < _count; i++)
+            {
+                int p = _parent[i] < 0 ? -1 : moved[_parent[i]];
+                bool keep = (_flags[i] & EntryFlags.Deleted) == 0 && (_parent[i] < 0 || p >= 0);
+                moved[i] = keep
+                    ? compact.AppendLocked(p, _names.AsSpan(_nameStart[i], _nameLength[i]), _size[i], _modified[i], _flags[i] & ~EntryFlags.HiddenTree)
+                    : -1;
+            }
+
+            foreach (var (path, index) in _roots)
+                if (moved[index] >= 0) compact._roots.Add((path, moved[index]));
+            foreach (var (volume, checkpoint) in Checkpoints) compact.Checkpoints[volume] = checkpoint;
+            foreach (var (root, time) in RootScanTimes) compact.RootScanTimes[root] = time;
+            return compact;
+        }
+    }
+
+    /// <summary>Children come after their parent, so one forward pass removes whole subtrees of removed folders.</summary>
+    void SweepLocked()
+    {
+        for (int i = 0; i < _count; i++)
+        {
+            int p = _parent[i];
+            if (p >= 0 && (_flags[i] & EntryFlags.Deleted) == 0 && (_flags[p] & EntryFlags.Deleted) != 0)
+                KillLocked(i);
+        }
     }
 
     void KillLocked(int i)
@@ -410,6 +592,19 @@ public sealed class FileIndex
                 writer.Write(path);
                 writer.Write(index);
             }
+            writer.Write(Checkpoints.Count);
+            foreach (var (volume, checkpoint) in Checkpoints)
+            {
+                writer.Write(volume);
+                writer.Write(checkpoint.JournalId);
+                writer.Write(checkpoint.Position);
+            }
+            writer.Write(RootScanTimes.Count);
+            foreach (var (root, time) in RootScanTimes)
+            {
+                writer.Write(root);
+                writer.Write(time);
+            }
             writer.Write(MemoryMarshal.AsBytes(s.Names.AsSpan(0, s.NamesLength)));
             writer.Write(MemoryMarshal.AsBytes(s.NameStart.AsSpan(0, s.Count)));
             writer.Write(MemoryMarshal.AsBytes(s.NameLength.AsSpan(0, s.Count)));
@@ -440,6 +635,10 @@ public sealed class FileIndex
             var index = new FileIndex(signature);
             for (int r = 0; r < rootCount; r++)
                 index._roots.Add((reader.ReadString(), reader.ReadInt32()));
+            for (int c = reader.ReadInt32(); c > 0; c--)
+                index.Checkpoints[reader.ReadString()] = (reader.ReadInt64(), reader.ReadInt64());
+            for (int s = reader.ReadInt32(); s > 0; s--)
+                index.RootScanTimes[reader.ReadString()] = reader.ReadInt64();
 
             index._names = new char[Math.Max(namesLength, 16)];
             index._nameStart = new int[Math.Max(count, 16)];

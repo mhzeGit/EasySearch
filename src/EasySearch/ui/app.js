@@ -8,14 +8,15 @@
   const esc = text => String(text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   const demo = new URLSearchParams(location.search).has('demo'); // sample data inside the real window
-  const hosted = !!window.chrome?.webview && !demo;
+  const inHost = !!window.chrome?.webview; // the Windows app is around us, so real file icons are available
+  const hosted = inHost && !demo;
   const host = hosted
     ? {
         post: message => window.chrome.webview.postMessage(message),
         listen: handler => window.chrome.webview.addEventListener('message', e => handler(e.data)),
       }
     : window.createMockHost();
-  if (!window.chrome?.webview) document.documentElement.classList.add('mock'); // plain browser: draw a stand-in desktop
+  if (!inHost) document.documentElement.classList.add('mock'); // plain browser: draw a stand-in desktop
 
   // ---- icons -----------------------------------------------------------------------
 
@@ -257,10 +258,11 @@
   const iconCache = new Map(); // extension -> icon URL, so one request serves every file of a type
   const PER_FILE_ICONS = new Set(['exe', 'lnk', 'ico', 'cur', 'url', 'scr', 'msi']);
 
+  /** URL of the icon Windows itself shows for this file or folder. */
   function iconUrl(item, size) {
-    if (!hosted) return null;
+    if (!inHost) return null;
     const path = pathOf(item);
-    const url = `https://images.easysearch.example/icon?s=${size}&p=${encodeURIComponent(path)}`;
+    const url = `https://images.easysearch.example/icon?s=${size}&d=${item.isDir ? 1 : 0}&p=${encodeURIComponent(path)}`;
     const ext = item.isDir ? '' : extOf(item.name);
     if (!ext || PER_FILE_ICONS.has(ext)) return url;
     const key = `${ext}|${size}`;
@@ -269,7 +271,7 @@
   }
 
   const thumbUrl = item =>
-    `https://images.easysearch.example/thumb?s=512&p=${encodeURIComponent(pathOf(item))}&m=${item.modified}`;
+    `https://images.easysearch.example/thumb?s=512&d=${item.isDir ? 1 : 0}&p=${encodeURIComponent(pathOf(item))}&m=${item.modified}`;
 
   // ---- searching -------------------------------------------------------------------
 
@@ -351,16 +353,17 @@
 
   function homeCommands() {
     const place = label => state.places.find(p => p.label === label);
+    const pathOfPlace = label => place(label)?.path;
     const commands = [
       { section: 'Quick filters' },
-      { command: true, icon: 'document', kind: 'document', title: 'Recent documents', note: 'Documents, newest first', run: () => applyPreset({ kind: 'document', sort: 'modified' }) },
-      { command: true, icon: 'image', kind: 'image', title: 'Images from the last 7 days', note: 'Photos, screenshots and graphics', run: () => applyPreset({ kind: 'image', modified: 'week', sort: 'modified' }) },
-      { command: true, icon: 'archive', kind: 'archive', title: 'Large files', note: 'Everything over 1 GB, biggest first', run: () => applyPreset({ size: 'huge', sort: 'size' }) },
-      { command: true, icon: 'folder', kind: 'folder', title: 'Recently changed folders', note: 'Where work has been happening', run: () => applyPreset({ kind: 'folder', sort: 'modified' }) },
+      { command: true, icon: 'document', kind: 'document', path: pathOfPlace('Documents'), title: 'Recent documents', note: 'Documents, newest first', run: () => applyPreset({ kind: 'document', sort: 'modified' }) },
+      { command: true, icon: 'image', kind: 'image', path: pathOfPlace('Pictures'), title: 'Images from the last 7 days', note: 'Photos, screenshots and graphics', run: () => applyPreset({ kind: 'image', modified: 'week', sort: 'modified' }) },
+      { command: true, icon: 'archive', kind: 'archive', path: state.settings.roots[0], title: 'Large files', note: 'Everything over 1 GB, biggest first', run: () => applyPreset({ size: 'huge', sort: 'size' }) },
+      { command: true, icon: 'folder', kind: 'folder', path: 'folder', title: 'Recently changed folders', note: 'Where work has been happening', run: () => applyPreset({ kind: 'folder', sort: 'modified' }) },
     ];
     const downloads = place('Downloads');
     if (downloads)
-      commands.push({ command: true, icon: 'clock', kind: 'accent', title: 'Latest downloads', note: breadcrumbText(downloads.path), run: () => applyPreset({ scope: downloads, sort: 'modified' }) });
+      commands.push({ command: true, icon: 'clock', kind: 'accent', path: downloads.path, title: 'Latest downloads', note: breadcrumbText(downloads.path), run: () => applyPreset({ scope: downloads, sort: 'modified' }) });
 
     const recent = recentSearches();
     if (recent.length > 0) {
@@ -398,14 +401,18 @@
 
   const selectedItem = () => state.items[state.selected] || null;
 
+  /**
+   * The icon for a row. Inside the app this is the icon Windows shows for the item; the drawn
+   * glyph underneath only appears if Windows has none (and in the browser preview).
+   */
   function rowIcon(item, size = 18) {
-    if (item.command) return `<span class="row-icon k-${item.kind}">${icon(item.icon, size)}</span>`;
-    const kind = kindOf(item);
-    const url = iconUrl(item, 64);
-    const img = url
-      ? `<img src="${esc(url)}" alt="" loading="lazy" onload="this.parentNode.classList.add('has-img')" onerror="this.remove()">`
-      : '';
-    return `<span class="row-icon k-${kind}">${icon(kindIcon(kind), size)}${img}</span>`;
+    // A quick filter borrows the icon of the folder or drive it is about.
+    const target = item.command ? (item.path ? { name: item.path, dir: '', isDir: true } : null) : item;
+    const kind = item.command ? item.kind : kindOf(item);
+    const glyph = icon(item.command ? item.icon : kindIcon(kind), size);
+    const url = target ? iconUrl(target, 64) : null;
+    if (!url) return `<span class="row-icon k-${kind}">${glyph}</span>`;
+    return `<span class="row-icon pending k-${kind}">${glyph}<img src="${esc(url)}" alt="" loading="lazy" onload="this.parentNode.classList.add('has-img')" onerror="this.parentNode.classList.remove('pending'); this.remove()"></span>`;
   }
 
   function renderList({ keepScroll = false } = {}) {
@@ -510,8 +517,8 @@
     const path = pathOf(item);
     const kind = kindOf(item);
     const visual = kind === 'image' || kind === 'video' || extOf(item.name) === 'pdf';
-    const hero = hosted
-      ? `<img class="${visual ? '' : 'icon'}" src="${esc(visual ? thumbUrl(item) : iconUrl(item, 256))}" alt="" onerror="this.replaceWith(this.nextElementSibling.content.cloneNode(true))"><template>${rowIcon({ ...item, command: false }, 34).replace(/<img[^>]*>/, '')}</template>`
+    const hero = inHost
+      ? `<img class="${visual ? '' : 'icon'}" src="${esc(visual ? thumbUrl(item) : iconUrl(item, 256))}" alt="" onerror="this.replaceWith(this.nextElementSibling.content.cloneNode(true))"><template>${rowIcon({ ...item, command: false }, 34).replace(/<img[^>]*>/, '').replace(' pending', '')}</template>`
       : `<span class="row-icon k-${kind}">${icon(kindIcon(kind), 34)}</span>`;
 
     els.preview.innerHTML = `
@@ -851,7 +858,7 @@
             <p class="group-note">Drives and folders that are kept indexed. Everything inside them is searchable.</p>
             <div class="card">
               ${s.roots.map((root, i) => field(esc(root), '', `<button class="icon-btn" data-remove-root="${i}" title="Remove"${s.roots.length === 1 ? ' disabled style="opacity:.3"' : ''}>${icon('x', 15)}</button>`)
-                .replace('<div class="field-text">', `<span class="row-icon k-folder">${icon(/^[a-z]:\\?$/i.test(root) ? 'drive' : 'folder', 15)}</span><div class="field-text">`)).join('')}
+                .replace('<div class="field-text">', `${rowIcon({ command: true, kind: 'folder', icon: /^[a-z]:\\?$/i.test(root) ? 'drive' : 'folder', path: root }, 15)}<div class="field-text">`)).join('')}
               <div class="field"><button class="btn ghost" id="add-root">${'Add folder…'}</button></div>
             </div>
           </div>
@@ -1056,6 +1063,9 @@
       if (reopen) { e.preventDefault(); e.stopPropagation(); menu.swallow = true; }
     }
     if (state.view === 'main' && e.target !== els.query && !e.target.closest('.preview')) e.preventDefault();
+
+    // Empty parts of the top bar act as a title bar: dragging them moves the window.
+    if (e.button === 0 && e.target.closest('.searchbar, .set-head') && !e.target.closest('input, button')) host.post({ type: 'drag' });
   }, true);
   document.addEventListener('click', e => {
     if (menu.swallow) { menu.swallow = false; e.preventDefault(); e.stopPropagation(); }
@@ -1175,6 +1185,7 @@
         els.window.classList.add('appear');
         if (state.view === 'main') { els.query.focus(); els.query.select(); }
         if (isSearching()) runSearch({ keepSelection: true });
+        requestAnimationFrame(() => host.post({ type: 'painted' }));
         break;
     }
   });

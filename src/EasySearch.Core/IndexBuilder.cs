@@ -1,14 +1,14 @@
 using System.Collections.Concurrent;
 using System.IO.Enumeration;
+using System.Runtime.InteropServices;
 
 namespace EasySearch.Core;
 
 /// <summary>
-/// Fills a <see cref="FileIndex"/> by walking folders in parallel. Each folder is read with a
-/// single directory query that already carries sizes, dates and attributes, so no per-file
-/// system calls are needed.
+/// Lists one folder with a single directory query that already carries sizes, dates and
+/// attributes, so no per-file system calls are needed. Reused across folders to avoid garbage.
 /// </summary>
-public static class IndexBuilder
+public sealed class FolderReader(IndexScope scope)
 {
     static readonly EnumerationOptions Options = new()
     {
@@ -18,14 +18,97 @@ public static class IndexBuilder
         ReturnSpecialDirectories = false,
     };
 
+    readonly List<RawEntry> _entries = new(256);
+    readonly List<string> _folderPaths = new(32);
+    char[] _names = new char[8192];
+    int _namesLength;
+    string _current = "";
+    FileSystemEnumerable<bool>.FindTransform? _collect;
+
+    /// <summary>Everything in the folder that belongs in the index (excluded folders are left out).</summary>
+    public List<RawEntry> Entries => _entries;
+
+    /// <summary>The names of <see cref="Entries"/>, back to back.</summary>
+    public ReadOnlySpan<char> Names => _names.AsSpan(0, _namesLength);
+
+    /// <summary>Full path of each sub-folder in <see cref="Entries"/>, in the same order.</summary>
+    public List<string> FolderPaths => _folderPaths;
+
+    /// <summary>Reads the folder at <paramref name="path"/> (a normalized path). Throws when it cannot be opened.</summary>
+    public void Read(string path)
+    {
+        _entries.Clear();
+        _folderPaths.Clear();
+        _namesLength = 0;
+        _current = path;
+        _collect ??= Collect;
+        foreach (var _ in new FileSystemEnumerable<bool>(PathUtil.Display(path), _collect, Options)) { }
+    }
+
+    public FolderSnapshot ToSnapshot(int index) => new()
+    {
+        Index = index,
+        Path = _current,
+        Names = Names.ToArray(),
+        Entries = [.. _entries],
+    };
+
+    bool Collect(ref FileSystemEntry entry)
+    {
+        var name = entry.FileName;
+        var attributes = entry.Attributes;
+        var flags = EntryFlags.None;
+        if ((attributes & FileAttributes.Hidden) != 0) flags |= EntryFlags.Hidden;
+        if ((attributes & FileAttributes.System) != 0) flags |= EntryFlags.System;
+        if ((attributes & FileAttributes.ReparsePoint) != 0) flags |= EntryFlags.Reparse;
+
+        if (entry.IsDirectory)
+        {
+            if (scope.IsExcludedName(name)) return false;
+            string folderPath = string.Concat(_current, "\\", name);
+            if (scope.IsExcludedPath(folderPath)) return false;
+            flags |= EntryFlags.Directory;
+            _folderPaths.Add(folderPath);
+        }
+
+        if (_namesLength + name.Length > _names.Length)
+            Array.Resize(ref _names, Math.Max(_names.Length * 2, _namesLength + name.Length));
+        name.CopyTo(_names.AsSpan(_namesLength));
+
+        _entries.Add(new RawEntry
+        {
+            NameStart = _namesLength,
+            NameLength = (ushort)Math.Min(name.Length, ushort.MaxValue),
+            Size = entry.IsDirectory ? 0 : entry.Length,
+            Modified = entry.LastWriteTimeUtc.UtcTicks,
+            Flags = flags,
+        });
+        _namesLength += name.Length;
+        return true;
+    }
+}
+
+/// <summary>Fills a <see cref="FileIndex"/> by walking folders in parallel.</summary>
+public static class IndexBuilder
+{
+    /// <summary>Builds a fresh index of every location in <paramref name="scope"/>.</summary>
     public static FileIndex Build(IndexScope scope, CancellationToken cancel = default,
-        int workers = 0, Action<FileIndex>? onCreated = null, ThreadPriority priority = ThreadPriority.Normal)
+        int workers = 0, Action<FileIndex>? onCreated = null, ThreadPriority priority = ThreadPriority.Normal) =>
+        Build(scope, scope.Roots, cancel, workers, onCreated, priority);
+
+    /// <summary>Builds an index holding just one of the scope's locations (used to refresh it in place).</summary>
+    public static FileIndex BuildRoot(IndexScope scope, string root, CancellationToken cancel = default,
+        int workers = 0, ThreadPriority priority = ThreadPriority.Normal) =>
+        Build(scope, [root], cancel, workers, null, priority);
+
+    static FileIndex Build(IndexScope scope, IEnumerable<string> roots, CancellationToken cancel,
+        int workers, Action<FileIndex>? onCreated, ThreadPriority priority)
     {
         var index = new FileIndex(scope.Signature);
         onCreated?.Invoke(index);
 
         var start = new List<(string, int)>();
-        foreach (var root in scope.Roots)
+        foreach (var root in roots)
         {
             if (Directory.Exists(PathUtil.Display(root)))
                 start.Add((root, index.AddRoot(root)));
@@ -47,7 +130,8 @@ public static class IndexBuilder
 
         void Work()
         {
-            var worker = new Worker(index, scope);
+            var reader = new FolderReader(scope);
+            var folderIndices = new List<int>(32);
             var spin = new SpinWait();
             while (!cancel.IsCancellationRequested)
             {
@@ -60,7 +144,21 @@ public static class IndexBuilder
                 spin.Reset();
                 try
                 {
-                    worker.ScanFolder(folder.Path, folder.Index, stack, ref pending);
+                    reader.Read(folder.Path);
+                    index.AddChildren(folder.Index, reader.Names, reader.Entries, folderIndices);
+                    if (folderIndices.Count != reader.FolderPaths.Count) continue; // parent was removed meanwhile
+
+                    int f = 0;
+                    foreach (ref readonly var e in CollectionsMarshal.AsSpan(reader.Entries))
+                    {
+                        if ((e.Flags & EntryFlags.Directory) == 0) continue;
+                        string folderPath = reader.FolderPaths[f];
+                        int folderIndex = folderIndices[f++];
+                        if ((e.Flags & EntryFlags.Reparse) != 0 && IsLink(folderPath)) continue;
+
+                        Interlocked.Increment(ref pending);
+                        stack.Push((folderPath, folderIndex));
+                    }
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
                 {
@@ -88,81 +186,17 @@ public static class IndexBuilder
         foreach (var thread in threads) thread.Join();
     }
 
-    sealed class Worker(FileIndex index, IndexScope scope)
+    /// <summary>Scans folders that just appeared in the index. Links are listed but never followed.</summary>
+    public static void ScanNew(FileIndex index, List<(string Path, int Index)> folders, IndexScope scope, CancellationToken cancel = default)
     {
-        readonly List<RawEntry> _entries = new(256);
-        readonly List<string> _folderPaths = new(32);
-        readonly List<int> _folderIndices = new(32);
-        char[] _names = new char[8192];
-        int _namesLength;
-        string _current = "";
-        FileSystemEnumerable<bool>.FindTransform? _collect;
+        folders.RemoveAll(folder => IsLink(folder.Path));
+        Scan(index, folders, scope, cancel, workers: 1);
+    }
 
-        public void ScanFolder(string path, int parentIndex, ConcurrentStack<(string, int)> stack, ref int pending)
-        {
-            _entries.Clear();
-            _folderPaths.Clear();
-            _namesLength = 0;
-            _current = path;
-            _collect ??= Collect;
-
-            foreach (var _ in new FileSystemEnumerable<bool>(PathUtil.Display(path), _collect, Options)) { }
-
-            index.AddChildren(parentIndex, _names.AsSpan(0, _namesLength), _entries, _folderIndices);
-            if (_folderIndices.Count != _folderPaths.Count) return; // parent was removed meanwhile
-
-            int f = 0;
-            foreach (ref readonly var e in System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_entries))
-            {
-                if ((e.Flags & EntryFlags.Directory) == 0) continue;
-                string folderPath = _folderPaths[f];
-                int folderIndex = _folderIndices[f++];
-                if ((e.Flags & EntryFlags.Reparse) != 0 && IsLink(folderPath)) continue;
-
-                Interlocked.Increment(ref pending);
-                stack.Push((folderPath, folderIndex));
-            }
-        }
-
-        bool Collect(ref FileSystemEntry entry)
-        {
-            var name = entry.FileName;
-            var attributes = entry.Attributes;
-            var flags = EntryFlags.None;
-            if ((attributes & FileAttributes.Hidden) != 0) flags |= EntryFlags.Hidden;
-            if ((attributes & FileAttributes.System) != 0) flags |= EntryFlags.System;
-            if ((attributes & FileAttributes.ReparsePoint) != 0) flags |= EntryFlags.Reparse;
-
-            if (entry.IsDirectory)
-            {
-                if (scope.IsExcludedName(name)) return false;
-                string folderPath = string.Concat(_current, "\\", name);
-                if (scope.IsExcludedPath(folderPath)) return false;
-                flags |= EntryFlags.Directory;
-                _folderPaths.Add(folderPath);
-            }
-
-            if (_namesLength + name.Length > _names.Length)
-                Array.Resize(ref _names, Math.Max(_names.Length * 2, _namesLength + name.Length));
-            name.CopyTo(_names.AsSpan(_namesLength));
-
-            _entries.Add(new RawEntry
-            {
-                NameStart = _namesLength,
-                NameLength = (ushort)Math.Min(name.Length, ushort.MaxValue),
-                Size = entry.IsDirectory ? 0 : entry.Length,
-                Modified = entry.LastWriteTimeUtc.UtcTicks,
-                Flags = flags,
-            });
-            _namesLength += name.Length;
-            return true;
-        }
-
-        /// <summary>Junctions and symlinks are listed but not followed, to avoid loops and duplicates.</summary>
-        static bool IsLink(string folderPath)
-        {
-            try { return new DirectoryInfo(folderPath).LinkTarget is not null; }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return true; }
-        }
+    /// <summary>Junctions and symlinks are not followed, to avoid loops and duplicates.</summary>
+    static bool IsLink(string folderPath)
+    {
+        try { return new DirectoryInfo(folderPath).LinkTarget is not null; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return true; }
     }
 }

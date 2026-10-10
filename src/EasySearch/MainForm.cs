@@ -33,8 +33,12 @@ public sealed partial class MainForm : Form
     bool _quitting;
     bool _suppressHide;
     bool _hotkeyRegistered;
+    HotkeyHook? _hotkeyHook;
     int _statusDirty;
     double _uiScale;
+    bool _capturing;
+    readonly System.Diagnostics.Stopwatch _showTimer = new();
+    readonly System.Windows.Forms.Timer _trimTimer;
 
     public MainForm(StartupOptions options)
     {
@@ -78,6 +82,15 @@ public sealed partial class MainForm : Form
             if (Interlocked.Exchange(ref _statusDirty, 0) == 1 || _index.Status.Indexing) PostStatus();
         };
         _statusTimer.Start();
+
+        // Twenty seconds after the palette was dismissed, let the web view release memory it is not using.
+        _trimTimer = new System.Windows.Forms.Timer { Interval = 20_000 };
+        _trimTimer.Tick += (_, _) =>
+        {
+            _trimTimer.Stop();
+            if (!Visible && _web.CoreWebView2 is { } core) core.MemoryUsageTargetLevel = CoreWebView2MemoryUsageTargetLevel.Low;
+        };
+        _backdrop.WarmUp();
 
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
     }
@@ -143,16 +156,70 @@ public sealed partial class MainForm : Form
             if (!IsHandleCreated) CreateHandle();
             value = false;
         }
-        if (value && !Visible)
+        bool appearing = value && !Visible;
+        Task? capture = null;
+        if (appearing)
         {
-            // About to appear: settle the position, then photograph what will be behind the window.
             if (!IsHandleCreated) CreateHandle();
+            _showTimer.Restart();
+            _marks.Clear();
             PlaceOnScreen();
-            _backdrop.Capture(Screen.FromRectangle(Bounds).Bounds);
-            Invalidate(false);
+
+            // Cloaked, the window can be shown and laid out without being on screen yet. That lets
+            // the screen behind it be photographed on another thread while the window wakes up,
+            // and avoids a flash of the previous backdrop.
+            Cloak(true);
+            var area = Rectangle.Intersect(Rectangle.Inflate(Bounds, 32, 32), Screen.FromRectangle(Bounds).Bounds);
+            _capturing = true;
+            capture = Task.Run(() => _backdrop.Capture(area));
+            Mark("placed");
         }
+
         base.SetVisibleCore(value);
+
+        if (capture is not null)
+        {
+            Mark("visible");
+            try { capture.Wait(); }
+            catch (AggregateException) { } // no backdrop: the plain colour is painted instead
+            _capturing = false;
+            Mark("captured");
+            Invalidate(false);
+            Update();
+            Mark("painted");
+            Cloak(false);
+            SetBackgroundMode(false);
+            Mark("ready");
+        }
+        else if (!value)
+        {
+            SetBackgroundMode(true);
+        }
         Initialize();
+    }
+
+    void Cloak(bool cloaked)
+    {
+        int value = cloaked ? 1 : 0;
+        Native.DwmSetWindowAttribute(Handle, Native.DWMWA_CLOAK, ref value, sizeof(int));
+    }
+
+    /// <summary>
+    /// While the palette is hidden nothing needs to be drawn or refreshed: status updates stop,
+    /// the index folds in changes at a slower pace, and after a little while the web view is
+    /// told it may give memory back.
+    /// </summary>
+    void SetBackgroundMode(bool background)
+    {
+        _index.Relaxed = background;
+        _statusTimer.Enabled = !background;
+        _trimTimer.Enabled = background;
+        if (!background)
+        {
+            if (_web.CoreWebView2 is { } core) core.MemoryUsageTargetLevel = CoreWebView2MemoryUsageTargetLevel.Normal;
+            _index.Refresh(); // fold in the latest file changes right away
+            PostStatus();
+        }
     }
 
     protected override void OnMove(EventArgs e)
@@ -188,6 +255,7 @@ public sealed partial class MainForm : Form
     {
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _statusTimer.Dispose();
+        _trimTimer.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         _index.Dispose();
@@ -196,8 +264,29 @@ public sealed partial class MainForm : Form
         base.OnFormClosed(e);
     }
 
-    protected override void OnPaintBackground(PaintEventArgs e) =>
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        if (_capturing) return; // still cloaked; the real paint follows as soon as the capture is in
         _backdrop.Paint(e.Graphics, Bounds, DarkTheme, SurfaceColor);
+    }
+
+    /// <summary>Set EASYSEARCH_TRACE=1 to log timings to trace.log in the data folder.</summary>
+    static readonly bool Tracing = Environment.GetEnvironmentVariable("EASYSEARCH_TRACE") == "1";
+
+    readonly System.Text.StringBuilder _marks = new();
+
+    /// <summary>Notes how far into the current show we are (only when tracing).</summary>
+    void Mark(string step)
+    {
+        if (Tracing) _marks.Append($" {step}@{_showTimer.Elapsed.TotalMilliseconds:F0}");
+    }
+
+    internal static void Trace(string line)
+    {
+        if (!Tracing) return;
+        try { File.AppendAllText(Path.Combine(AppSettings.DataFolder, "trace.log"), $"{DateTime.Now:HH:mm:ss.fff} {line}{Environment.NewLine}"); }
+        catch (IOException) { }
+    }
 
     void ApplyChrome()
     {
@@ -217,15 +306,15 @@ public sealed partial class MainForm : Form
     void PlaceOnScreen()
     {
         var area = Screen.FromPoint(Cursor.Position).WorkingArea;
-        Location = area.Location; // move first so the window adopts that monitor's DPI
         double scale = _uiScale > 0 ? _uiScale : DeviceDpi / 96.0;
         var size = new Size(
             Math.Min((int)(BaseSize.Width * scale), area.Width - 24),
             Math.Min((int)(BaseSize.Height * scale), area.Height - 24));
-        Bounds = new Rectangle(
+        var bounds = new Rectangle(
             area.Left + (area.Width - size.Width) / 2,
             area.Top + (int)((area.Height - size.Height) * 0.38),
             size.Width, size.Height);
+        if (Bounds != bounds) Bounds = bounds;
     }
 
     /// <summary>
@@ -239,13 +328,44 @@ public sealed partial class MainForm : Form
         if (Visible) PlaceOnScreen();
     }
 
+    /// <summary>Development: with --passive the window never takes keyboard focus, so it can be inspected without interrupting work.</summary>
+    protected override bool ShowWithoutActivation => _options.Passive;
+
     public void ShowPalette()
     {
         Show(); // positions the window and captures the backdrop when it was hidden
-        Activate();
-        Native.SetForegroundWindow(Handle);
-        _web.Focus();
+        // Hide-on-blur must not fire while focus is being moved onto the palette.
+        _suppressHide = true;
+        try { if (!_options.Passive) TakeFocus(); }
+        finally { _suppressHide = false; }
+        Mark("focused");
+        if (!_options.Passive) _web.Focus();
+        Mark("web-focused");
         Post(new { type = "shown" });
+        if (Tracing) Trace("show steps:" + _marks);
+    }
+
+    /// <summary>
+    /// Windows only lets a background app come to the front in certain situations. Borrowing the
+    /// input state of whichever window currently has focus is the dependable way to do it.
+    /// </summary>
+    void TakeFocus()
+    {
+        Activate();
+        if (Native.GetForegroundWindow() == Handle) return;
+
+        uint current = Native.GetCurrentThreadId();
+        uint foreground = Native.GetWindowThreadProcessId(Native.GetForegroundWindow(), IntPtr.Zero);
+        bool attached = foreground != 0 && foreground != current && Native.AttachThreadInput(foreground, current, true);
+        Native.BringWindowToTop(Handle);
+        Native.SetForegroundWindow(Handle);
+        if (attached) Native.AttachThreadInput(foreground, current, false);
+        if (Native.GetForegroundWindow() == Handle) return;
+
+        // Last resort: a tap of an unassigned key makes this process the one that produced the latest input.
+        Native.keybd_event(0xFF, 0, 0, UIntPtr.Zero);
+        Native.keybd_event(0xFF, 0, 2, UIntPtr.Zero);
+        Native.SetForegroundWindow(Handle);
     }
 
     void Toggle()
@@ -273,13 +393,26 @@ public sealed partial class MainForm : Form
     {
         UnregisterHotkey();
         if (!TryParseHotkey(_settings.Hotkey, out uint modifiers, out uint key)) return false;
-        _hotkeyRegistered = Native.RegisterHotKey(Handle, HotkeyId, modifiers | Native.MOD_NOREPEAT, key);
+
+        if (Native.RegisterHotKey(Handle, HotkeyId, modifiers | Native.MOD_NOREPEAT, key))
+        {
+            _hotkeyRegistered = true;
+        }
+        else
+        {
+            // Windows keeps some combinations for itself (Win+Space among them). Take those over
+            // with a keyboard hook instead.
+            _hotkeyHook = HotkeyHook.TryInstall(modifiers, key, () => BeginInvoke(Toggle));
+            _hotkeyRegistered = _hotkeyHook is not null;
+        }
         return _hotkeyRegistered;
     }
 
     void UnregisterHotkey()
     {
-        if (_hotkeyRegistered) Native.UnregisterHotKey(Handle, HotkeyId);
+        if (_hotkeyHook is not null) _hotkeyHook.Dispose();
+        else if (_hotkeyRegistered) Native.UnregisterHotKey(Handle, HotkeyId);
+        _hotkeyHook = null;
         _hotkeyRegistered = false;
     }
 
@@ -327,7 +460,6 @@ public sealed partial class MainForm : Form
             settings.IsSwipeNavigationEnabled = false;
             settings.IsGeneralAutofillEnabled = false;
             settings.IsPasswordAutosaveEnabled = false;
-            settings.IsNonClientRegionSupportEnabled = true; // lets CSS "app-region: drag" move the window
 #if DEBUG
             settings.AreDevToolsEnabled = true;
 #else
@@ -366,7 +498,7 @@ public sealed partial class MainForm : Form
         }
 
         var deferral = e.GetDeferral();
-        _images.Request(path, size, thumbnail: uri.AbsolutePath == "/thumb", png =>
+        _images.Request(path, size, thumbnail: uri.AbsolutePath == "/thumb", isDirectory: query["d"] == "1", png =>
         {
             try
             {
@@ -412,7 +544,7 @@ public sealed partial class MainForm : Form
 
             var viewport = await _web.CoreWebView2.ExecuteScriptAsync("[innerWidth, innerHeight, devicePixelRatio]");
             File.WriteAllText(file + ".txt",
-                $"window {Bounds} client {ClientSize} dpi {DeviceDpi} viewport {viewport} foreground {Native.GetForegroundWindow() == Handle}");
+                $"window {Bounds} client {ClientSize} dpi {DeviceDpi} viewport {viewport} foreground {Native.GetForegroundWindow() == Handle} hotkey {(_hotkeyHook is not null ? "hook" : _hotkeyRegistered ? "registered" : "none")}");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
         {

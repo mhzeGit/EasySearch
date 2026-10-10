@@ -36,12 +36,15 @@ sealed class ShellImages : IDisposable
         }
     }
 
-    /// <summary>Loads an icon (or, with <paramref name="thumbnail"/>, a content preview) and calls back with PNG bytes or null.</summary>
-    public void Request(string path, int size, bool thumbnail, Action<byte[]?> done)
+    /// <summary>
+    /// Loads the Windows icon for a file or folder (or, with <paramref name="thumbnail"/>, a preview
+    /// of its contents) and calls back with PNG bytes, or null if Windows has nothing to offer.
+    /// </summary>
+    public void Request(string path, int size, bool thumbnail, bool isDirectory, Action<byte[]?> done)
     {
         size = Math.Clamp(size, 16, 1024);
         string? cacheKey = null;
-        if (!thumbnail)
+        if (!thumbnail && !isDirectory)
         {
             var extension = Path.GetExtension(path);
             if (extension.Length > 0 && !PerFileIcons.Contains(extension))
@@ -57,20 +60,63 @@ sealed class ShellImages : IDisposable
 
         _work.Add(() =>
         {
-            byte[]? png = null;
-            try
-            {
-                png = Render(path, size, thumbnail ? SIIGBF_BIGGERSIZEOK : SIIGBF_ICONONLY);
-                if (png is not null && cacheKey is not null) _iconsByType[cacheKey] = png;
-            }
-            catch (Exception)
-            {
-                // Icon and thumbnail providers are third-party shell extensions and can fail in any
-                // way; a missing image just falls back to the built-in glyph.
-            }
+            // If the item itself yields nothing (deleted meanwhile, unreadable, no thumbnail
+            // provider), fall back to the standard Windows icon for its type.
+            byte[]? png = TryRender(path, size, thumbnail ? SIIGBF_BIGGERSIZEOK : SIIGBF_ICONONLY)
+                ?? TryRender(StandIn(path, isDirectory), size, SIIGBF_ICONONLY);
+            if (png is not null && cacheKey is not null) _iconsByType[cacheKey] = png;
             done(png);
         });
     }
+
+    static byte[]? TryRender(string? path, int size, int flags)
+    {
+        if (path is null) return null;
+        try
+        {
+            return Render(path, size, flags);
+        }
+        catch (Exception)
+        {
+            // Icon and thumbnail providers are third-party shell extensions and can fail in any way.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// An empty file (or folder) of the same type in the app's cache folder. Asking Windows for
+    /// its icon gives the standard icon for that type at any size.
+    /// </summary>
+    static string? StandIn(string path, bool isDirectory)
+    {
+        try
+        {
+            var folder = Path.Combine(AppSettings.CacheFolder, "icons");
+            if (isDirectory)
+            {
+                var standIn = Path.Combine(folder, "folder");
+                Directory.CreateDirectory(standIn);
+                return standIn;
+            }
+
+            var extension = Path.GetExtension(path);
+            bool plain = extension.Length is > 1 and <= 24 && extension.AsSpan(1).IndexOfAnyExcept(SafeExtensionChars) < 0;
+            var file = Path.Combine(folder, plain ? "type" + extension.ToLowerInvariant() : "type");
+            if (!File.Exists(file))
+            {
+                Directory.CreateDirectory(folder);
+                File.WriteAllBytes(file, []);
+            }
+            return file;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    static readonly System.Buffers.SearchValues<char> SafeExtensionChars =
+        System.Buffers.SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_");
 
     static byte[]? Render(string path, int size, int flags)
     {

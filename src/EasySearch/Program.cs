@@ -5,8 +5,9 @@ namespace EasySearch;
 /// <param name="Query">Open with this text already in the search box.</param>
 /// <param name="Capture">Development: save a PNG of the interface to this file, then exit.</param>
 /// <param name="OpenSettings">Open on the settings page.</param>
+/// <param name="Passive">Development: show without ever taking keyboard focus.</param>
 /// <param name="Demo">Development: run the interface on its built-in sample data (for screenshots).</param>
-public sealed record StartupOptions(bool Background, bool Stay, string? Query, string? Capture, bool OpenSettings, bool Demo)
+public sealed record StartupOptions(bool Background, bool Stay, string? Query, string? Capture, bool OpenSettings, bool Demo, bool Passive)
 {
     public static StartupOptions Parse(string[] args)
     {
@@ -22,7 +23,8 @@ public sealed record StartupOptions(bool Background, bool Stay, string? Query, s
             Query: Value("--query"),
             Capture: Value("--capture"),
             OpenSettings: args.Contains("--settings"),
-            Demo: args.Contains("--demo"));
+            Demo: args.Contains("--demo"),
+            Passive: args.Contains("--passive"));
     }
 }
 

@@ -88,7 +88,6 @@ svg.i { flex: none; display: block; }
   gap: 12px;
   padding: 0 14px 0 20px;
   border-bottom: 1px solid var(--line);
-  app-region: drag;
 }
 .searchbar-icon { color: var(--text-2); display: flex; }
 .searchbar-input {
@@ -100,7 +99,6 @@ svg.i { flex: none; display: block; }
   font: 400 21px/1 var(--font-display);
   letter-spacing: -.005em;
   caret-color: var(--accent);
-  app-region: no-drag;
 }
 .searchbar-input:focus-visible { outline: none; }
 .searchbar-input::placeholder { color: var(--text-3); }
@@ -120,7 +118,6 @@ svg.i { flex: none; display: block; }
   height: 30px;
   border-radius: 8px;
   color: var(--text-2);
-  app-region: no-drag;
   transition: background .12s, color .12s;
 }
 .icon-btn:hover, .icon-btn.on { background: var(--fill); color: var(--text); }
@@ -214,10 +211,12 @@ svg.i { flex: none; display: block; }
   background: color-mix(in srgb, var(--k, var(--k-file)) 15%, transparent);
 }
 .row-icon img { position: absolute; inset: -1px; width: 32px; height: 32px; object-fit: contain; opacity: 0; }
-.row-icon.has-img { background: none; }
-.row-icon.has-img svg { visibility: hidden; }
+/* Inside the app the Windows icon is the icon; the drawn glyph is only a fallback, so it stays
+   out of sight while the real one loads. */
+.row-icon.has-img, .row-icon.pending { background: none; }
+.row-icon.has-img svg, .row-icon.pending svg { visibility: hidden; }
 .row-icon.has-img img { opacity: 1; }
-.row.sel .row-icon:not(.has-img) { color: var(--on-accent); background: rgba(255, 255, 255, .2); }
+.row.sel .row-icon:not(.has-img):not(.pending) { color: var(--on-accent); background: rgba(255, 255, 255, .2); }
 .k-folder { --k: var(--k-folder); } .k-document { --k: var(--k-document); } .k-image { --k: var(--k-image); }
 .k-video { --k: var(--k-video); } .k-audio { --k: var(--k-audio); } .k-code { --k: var(--k-code); }
 .k-archive { --k: var(--k-archive); } .k-app { --k: var(--k-app); } .k-accent { --k: var(--accent); }
@@ -424,7 +423,7 @@ kbd {
 .window.in-settings > :not(.settings):not(.toast) { visibility: hidden; }
 @keyframes slide { from { opacity: 0; transform: translateX(14px); } }
 
-.set-head { display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--line); app-region: drag; }
+.set-head { display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid var(--line); }
 .set-head h1 { margin: 0; font: 600 15px var(--font-display); }
 .set-head .spacer { flex: 1; }
 .set-body { display: grid; grid-template-columns: 184px minmax(0, 1fr); min-height: 0; }
