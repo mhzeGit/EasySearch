@@ -45,6 +45,7 @@ public sealed partial class MainForm : Form
         _options = options;
         _startHidden = options.Background;
         _settings = AppSettings.Load();
+        AppSettings.ApplyLaunchAtLogin(_settings.LaunchAtLogin);
 
         Text = "EasySearch";
         Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);

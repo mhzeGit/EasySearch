@@ -133,7 +133,7 @@ svg.i { flex: none; display: block; }
   margin: 0;
   padding: 0;
   border: 0;
-  font: 400 21px/40px var(--font-display);
+  font: 400 18px/40px var(--font-display);
   letter-spacing: -.005em;
   white-space: pre;
   overflow: hidden;
@@ -163,7 +163,7 @@ svg.i { flex: none; display: block; }
   pointer-events: auto;
 }
 .query-highlight .query-filter { color: inherit; background: none; border-radius: 0; box-shadow: none; }
-.query-filter-chip:not(.query-folder-chip) .query-filter { font-size: 18px; line-height: 24px; }
+.query-filter-chip:not(.query-folder-chip) .query-filter { font-size: 16px; line-height: 24px; }
 .filter-remove {
   display: grid;
   place-items: center;

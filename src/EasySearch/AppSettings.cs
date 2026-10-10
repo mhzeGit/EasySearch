@@ -7,6 +7,7 @@ namespace EasySearch;
 public sealed class AppSettings
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    const int CurrentSettingsVersion = 1;
 
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -27,7 +28,8 @@ public sealed class AppSettings
     public string Accent { get; set; } = "#0a84ff";
     public string Hotkey { get; set; } = "Win+Space";
     public bool HideOnBlur { get; set; } = true;
-    public bool LaunchAtLogin { get; set; }
+    public bool LaunchAtLogin { get; set; } = true;
+    public int SettingsVersion { get; set; }
     public bool ShowPreview { get; set; } = true;
 
     /// <summary>When opened from a File Explorer window, search that window's folder.</summary>
@@ -58,6 +60,14 @@ public sealed class AppSettings
         if (settings is null)
         {
             settings = new AppSettings { Excluded = DefaultExclusions() };
+        }
+        // Turn on launch-at-login once for existing installs as well as new installs.
+        // The version marker preserves a user's choice to turn it off on later launches.
+        if (settings.SettingsVersion < CurrentSettingsVersion)
+        {
+            settings.LaunchAtLogin = true;
+            settings.SettingsVersion = CurrentSettingsVersion;
+            settings.Save();
         }
         if (settings.Roots.Count == 0) settings.Roots = DefaultRoots();
         return settings;
