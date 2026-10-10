@@ -105,40 +105,49 @@ public static class SearchEngine
             () => new Local(limit, ranking, worstFirst),
             (range, loop, local) =>
             {
-                if (cancel.IsCancellationRequested) { loop.Stop(); return local; }
+                if (cancel.IsCancellationRequested) { loop.Stop(); Flush(local); return local; }
                 if (driver is not null)
                 {
                     ScanNames(snapshot, range.Item1, range.Item2, driver, query.Comparison, matcher, local, cancel);
-                    return local;
                 }
-                for (int i = range.Item1; i < range.Item2; i++)
+                else for (int i = range.Item1; i < range.Item2; i++)
                 {
                     if ((i & 0x3FFF) == 0 && cancel.IsCancellationRequested) { loop.Stop(); break; }
                     if (matcher.IsMatch(i, local, out int score)) local.Add(new Hit(i, score));
                 }
+                Flush(local);
                 return local;
             },
-            local =>
-            {
-                Hit[]? partialHits = null;
-                long partialTotal = 0;
-                lock (best)
-                {
-                    total += local.Total;
-                    while (local.Heap.TryDequeue(out var hit, out _)) best.Add(hit);
-                    long now = Stopwatch.GetTimestamp();
-                    if (onProgress is not null && (lastProgress == 0 || Stopwatch.GetElapsedTime(lastProgress, now).TotalMilliseconds >= 100))
-                    {
-                        lastProgress = now;
-                        partialHits = [.. best];
-                        partialTotal = total;
-                    }
-                }
-                if (partialHits is not null) onProgress!(CreateResult(partialHits, partialTotal));
-            });
+            Flush);
 
         cancel.ThrowIfCancellationRequested();
         return CreateResult([.. best], total);
+
+        void Flush(Local local)
+        {
+            Hit[]? partialHits = null;
+            long partialTotal = 0;
+            lock (best)
+            {
+                total += local.Total;
+                local.Total = 0;
+                while (local.Heap.TryDequeue(out var hit, out _)) best.Add(hit);
+                if (best.Count > limit)
+                {
+                    best.Sort(ranking);
+                    best.RemoveRange(limit, best.Count - limit);
+                }
+
+                long now = Stopwatch.GetTimestamp();
+                if (onProgress is not null && (lastProgress == 0 || Stopwatch.GetElapsedTime(lastProgress, now).TotalMilliseconds >= 100))
+                {
+                    lastProgress = now;
+                    partialHits = [.. best];
+                    partialTotal = total;
+                }
+            }
+            if (partialHits is not null) onProgress!(CreateResult(partialHits, partialTotal));
+        }
 
         SearchResult CreateResult(Hit[] hits, long matchCount)
         {
