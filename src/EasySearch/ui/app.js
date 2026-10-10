@@ -538,16 +538,9 @@
   // ---- searching -------------------------------------------------------------------
 
   const hasFilters = () => /\b(?:type|ext|kind|size|date|dm|modified|changed|updated|in|source|location):\S+/i.test(state.query);
-  const isSearching = () => state.query.trim().length > 0;
+  const hasQuery = () => state.query.trim().length > 0;
 
   function runSearch({ keepSelection = false } = {}) {
-    if (!isSearching()) {
-      state.searchId++;
-      state.pending = false;
-      showHome();
-      return;
-    }
-
     const sort = SORTS.find(s => s.id === state.sort) || SORTS[0];
     state.pending = true;
     state.keepSelection = keepSelection;
@@ -568,6 +561,8 @@
   }
 
   function newSearch() {
+    clearTimeout(searchTimer);
+    searchTimer = 0;
     state.limit = 150;
     runSearch();
   }
@@ -673,17 +668,7 @@
     const scrollTop = els.list.scrollTop;
     let html = '';
 
-    if (!isSearching()) {
-      let index = 0;
-      for (const entry of state.sections) {
-        if (entry.section) { html += `<div class="section">${esc(entry.section)}</div>`; continue; }
-        html += `<div class="row cmd${index === state.selected ? ' sel' : ''}" data-i="${index}" role="option">
-          ${rowIcon(entry)}
-          <span class="row-main"><span class="row-name">${esc(entry.title)}</span><span class="row-path">${esc(entry.note)}</span></span>
-        </div>`;
-        index++;
-      }
-    } else if (state.pending) {
+    if (state.pending) {
       html = `<div class="empty"><h2>Searching…</h2></div>`;
     } else if (state.error) {
       html = `<div class="empty error">${icon('info', 34)}<h2>That search isn’t quite right</h2><p>${esc(state.error)}</p></div>`;
@@ -691,7 +676,9 @@
       const hidden = state.settings.showHidden ? '' : ' Hidden items are off — <span class="link" data-act="show-hidden">show them</span>.';
       const indexing = state.status.indexing ? ' The index is still being built, so more may turn up.' : '';
       const reset = hasFilters() ? ' <span class="link" data-act="reset">Clear filters</span>.' : '';
-      html = `<div class="empty">${icon('search', 34)}<h2>No results</h2><p>Nothing matches that search.${reset}${hidden}${indexing}</p></div>`;
+      html = hasQuery()
+        ? `<div class="empty">${icon('search', 34)}<h2>No results</h2><p>Nothing matches that search.${reset}${hidden}${indexing}</p></div>`
+        : `<div class="empty">${icon('search', 34)}<h2>No indexed files yet</h2><p>${indexing || 'Add a folder to the index in Settings.'}</p></div>`;
     } else {
       const terms = highlightTerms(state.query);
       state.items.forEach((item, index) => {
@@ -728,7 +715,7 @@
   }
 
   function renderCount() {
-    if (!isSearching() || state.error) { els.count.textContent = ''; return; }
+    if (state.error) { els.count.textContent = ''; return; }
     if (state.pending) { els.count.textContent = 'Searching…'; return; }
     const total = number.format(state.total);
     const time = state.elapsed < 10 ? state.elapsed.toFixed(1) : Math.round(state.elapsed);
@@ -736,7 +723,7 @@
   }
 
   function maybeLoadMore() {
-    if (state.pending || !isSearching() || state.items.length >= state.total || state.limit >= 5000) return;
+    if (state.pending || state.items.length >= state.total || state.limit >= 5000) return;
     if (els.list.scrollTop + els.list.clientHeight < els.list.scrollHeight - 400) return;
     state.limit = Math.min(5000, state.limit + 350);
     runSearch({ keepSelection: true });
@@ -1269,12 +1256,15 @@
 
   // ---- input -----------------------------------------------------------------------
 
+  let searchTimer = 0;
   els.query.addEventListener('input', () => {
     renderQueryHighlight();
     syncQuery();
-    // A previous keystroke can finish after the text has changed. Invalidate it now and
-    // replace its rows with a pending state so old one-letter results aren't shown for a
-    // longer query.
+    // Stop the previous query immediately, then wait for a short pause before scanning again.
+    // This avoids starting a full index scan for every character while typing.
+    clearTimeout(searchTimer);
+    state.searchId++;
+    host.post({ type: 'cancelSearch' });
     state.items = [];
     state.total = 0;
     state.error = null;
@@ -1282,7 +1272,10 @@
     state.pending = true;
     renderList();
     renderCount();
-    newSearch();
+    searchTimer = setTimeout(() => {
+      searchTimer = 0;
+      newSearch();
+    }, 120);
   });
   els.query.addEventListener('scroll', renderQueryHighlight);
   renderQueryHighlight();
@@ -1429,8 +1422,8 @@
     state.status = status;
     renderStatus();
     // Results on screen go stale when the index changes underneath them: refresh quietly.
-    if (state.view === 'main' && isSearching() && !state.pending && status.version !== state.searchedVersion ||
-        (status.indexing && isSearching() && !state.pending && state.items.length < 150)) {
+    if (state.view === 'main' && !state.pending && status.version !== state.searchedVersion ||
+        (status.indexing && state.view === 'main' && !state.pending && state.items.length < 150)) {
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => { if (!menu.isOpen) runSearch({ keepSelection: true }); }, status.indexing ? 1200 : 400);
     }
@@ -1471,7 +1464,7 @@
       case 'setQuery': if (state.view === 'settings') closeSettings(); setQuery(message.query); break;
       case 'shown':
         if (state.view === 'main') { els.query.focus(); els.query.select(); }
-        if (isSearching()) runSearch({ keepSelection: true });
+        runSearch({ keepSelection: true });
         requestAnimationFrame(() => host.post({ type: 'painted' }));
         break;
     }

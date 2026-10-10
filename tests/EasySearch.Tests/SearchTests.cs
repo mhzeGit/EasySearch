@@ -60,6 +60,26 @@ public sealed class SearchTests : IDisposable
     }
 
     [Fact]
+    public void Empty_query_returns_everything_and_text_keeps_the_full_word()
+    {
+        Write(@"docs\forklift.txt", 12, daysOld: 0);
+        Write(@"docs\f.txt", 12, daysOld: 0);
+        var index = IndexBuilder.Build(Scope());
+
+        var all = SearchEngine.Run(index, new SearchRequest { Limit = 1000, Sort = "name" });
+        Assert.Null(all.Error);
+        Assert.Contains(all.Items, item => item.Name == "Annual Report 2025.pdf");
+        Assert.Contains(all.Items, item => item.Name == "forklift.txt");
+
+        Assert.Equal(["forklift.txt"], Names("fork", index: index));
+        var folders = SearchEngine.Run(index, new SearchRequest { Query = "type:folder", Limit = 1000 });
+        Assert.Null(folders.Error);
+        Assert.NotEmpty(folders.Items);
+        Assert.All(folders.Items, item => Assert.True(item.IsDir));
+        Assert.True(folders.Total < all.Total);
+    }
+
+    [Fact]
     public void Or_not_phrase_and_wildcards()
     {
         Assert.Equal(["holiday.png", "notes.txt"], Names("holiday|notes"));

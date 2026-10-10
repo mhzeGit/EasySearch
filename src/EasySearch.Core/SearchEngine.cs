@@ -107,7 +107,7 @@ public static class SearchEngine
                 if (cancel.IsCancellationRequested) { loop.Stop(); return local; }
                 if (driver is not null)
                 {
-                    ScanNames(snapshot, range.Item1, range.Item2, driver, query.Comparison, matcher, local);
+                    ScanNames(snapshot, range.Item1, range.Item2, driver, query.Comparison, matcher, local, cancel);
                     return local;
                 }
                 for (int i = range.Item1; i < range.Item2; i++)
@@ -180,7 +180,7 @@ public static class SearchEngine
     /// evaluates the entries it lands in.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    static void ScanNames(IndexSnapshot snapshot, int from, int to, string driver, StringComparison comparison, Matcher matcher, Local local)
+    static void ScanNames(IndexSnapshot snapshot, int from, int to, string driver, StringComparison comparison, Matcher matcher, Local local, CancellationToken cancel)
     {
         var names = snapshot.Names;
         var starts = snapshot.NameStart;
@@ -189,6 +189,7 @@ public static class SearchEngine
 
         while (entry < to)
         {
+            if (cancel.IsCancellationRequested) return;
             int position = starts[entry];
             int found = names.AsSpan(position, end - position).IndexOf(driver, comparison);
             if (found < 0) return;
