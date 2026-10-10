@@ -109,7 +109,7 @@ svg.i { flex: none; display: block; }
 .qchip.invalid { box-shadow: inset 0 0 0 1.5px #f04438; }
 .qchip-label { color: color-mix(in srgb, var(--accent) 80%, var(--text)); font-weight: 600; font-size: 12px; letter-spacing: .02em; }
 .qchip-text { color: var(--text-3); font-size: 12px; }
-.qchip select, .qchip input {
+.qchip input, .qsel {
   height: 26px;
   border: 0;
   border-radius: 6px;
@@ -118,7 +118,9 @@ svg.i { flex: none; display: block; }
   font-size: 12.5px;
   min-width: 0;
 }
-.qchip select { padding: 0 4px; cursor: pointer; }
+.qsel { display: flex; align-items: center; gap: 5px; padding: 0 6px 0 9px; white-space: nowrap; }
+.qsel svg { opacity: .6; }
+.qsel:hover, .qsel.open { background: color-mix(in srgb, var(--accent) 22%, var(--fill-strong)); }
 .qchip input { padding: 0 8px; cursor: text; user-select: text; }
 .qchip input::placeholder { color: var(--text-3); }
 .qchip input.num { width: 64px; text-align: right; font-variant-numeric: tabular-nums; }

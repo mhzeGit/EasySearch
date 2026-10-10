@@ -416,8 +416,9 @@
     state.query = [...state.chips.map(chipToken).filter(Boolean), els.query.value.trim()].filter(Boolean).join(' ');
   }
 
-  const unitSelect = (field, value) =>
-    `<select data-f="${field}" aria-label="Unit">${SIZE_UNITS.map(u => `<option${u === value ? ' selected' : ''}>${u}</option>`).join('')}</select>`;
+  /** A drop-down button; it opens the app's own menu instead of the system list, which can't be themed. */
+  const choice = (field, label, name) =>
+    `<button class="qsel" data-f="${field}" aria-haspopup="menu" aria-label="${name}"><span>${esc(label)}</span>${icon('chevron', 12)}</button>`;
 
   function chipHtml(chip) {
     const remove = `<button class="qchip-x" data-f="remove" title="Remove" aria-label="Remove filter">${icon('x', 14)}</button>`;
@@ -428,13 +429,12 @@
 
     const between = chip.op === 'between';
     return `<div class="qchip${chipValid(chip) ? '' : ' invalid'}" data-id="${chip.id}"><span class="qchip-label">Size</span>
-      <select data-f="op" aria-label="Comparison">${SIZE_OPS.map(o =>
-        `<option value="${o.id}"${o.id === chip.op ? ' selected' : ''}>${o.label}</option>`).join('')}</select>
+      ${choice('op', SIZE_OPS.find(o => o.id === chip.op).label, 'Comparison')}
       <input class="num" data-f="lo" value="${esc(chip.lo)}" placeholder="${between ? 'min' : 'size'}" inputmode="decimal" aria-label="${between ? 'Minimum size' : 'Size'}" ${attrs}>
-      ${unitSelect('loUnit', chip.loUnit)}
+      ${choice('loUnit', chip.loUnit, 'Unit')}
       ${between ? `<span class="qchip-text">and</span>
       <input class="num" data-f="hi" value="${esc(chip.hi)}" placeholder="max" inputmode="decimal" aria-label="Maximum size" ${attrs}>
-      ${unitSelect('hiUnit', chip.hiUnit)}` : ''}
+      ${choice('hiUnit', chip.hiUnit, 'Unit')}` : ''}
       ${remove}</div>`;
   }
 
@@ -592,6 +592,7 @@
   function chipKey(e) {
     const target = document.activeElement;
     const open = target.dataset.f === 'text' && !els.suggest.hidden && suggest.items.length > 0;
+    if (target.classList.contains('qsel') && (e.key === 'Enter' || e.key === ' ')) return; // the button opens its menu
 
     if (open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault();
@@ -614,27 +615,36 @@
 
   els.chips.addEventListener('input', e => {
     const field = e.target.dataset.f, root = e.target.closest('.qchip');
-    if (!field || !root || e.target.tagName === 'SELECT') return;
+    if (!field || !root) return;
     chipById(root.dataset.id)[field] = e.target.value;
     chipChanged(root);
     if (field === 'text') showSuggestions(e.target);
   });
 
-  els.chips.addEventListener('change', e => {
-    const field = e.target.dataset.f, root = e.target.closest('.qchip');
-    if (!field || !root || e.target.tagName !== 'SELECT') return;
-    const chip = chipById(root.dataset.id);
-    chip[field] = e.target.value;
-    if (field === 'op') {
-      renderChips();
-      focusChip(chip);
-    }
-    chipChanged($(`.qchip[data-id="${chip.id}"]`, els.chips));
-  });
+  function openChipMenu(button) {
+    const chip = chipById(button.closest('.qchip').dataset.id), field = button.dataset.f;
+    const options = field === 'op' ? SIZE_OPS : SIZE_UNITS.map(u => ({ id: u, label: u }));
+    menu.open(button, options.map(o => ({
+      label: o.label,
+      checked: o.id === chip[field],
+      run: () => {
+        chip[field] = o.id;
+        renderChips();
+        const root = $(`.qchip[data-id="${chip.id}"]`, els.chips);
+        chipChanged(root);
+        // On to the number this choice belongs to.
+        const next = $(`[data-f="${field === 'hiUnit' ? 'hi' : 'lo'}"]`, root);
+        next.focus();
+        next.select();
+      },
+    })), { minWidth: field === 'op' ? 130 : 84 });
+  }
 
   els.chips.addEventListener('click', e => {
     const remove = e.target.closest('[data-f="remove"]');
-    if (remove) removeChip(remove.closest('.qchip').dataset.id);
+    if (remove) return removeChip(remove.closest('.qchip').dataset.id);
+    const choose = e.target.closest('.qsel');
+    if (choose) openChipMenu(choose);
   });
 
   els.chips.addEventListener('focusin', e => {
@@ -1131,7 +1141,7 @@
     anchor: null,
     get isOpen() { return !els.menu.hidden; },
 
-    open(anchor, items, { align = 'left', corner = false } = {}) {
+    open(anchor, items, { align = 'left', corner = false, minWidth = 0 } = {}) {
       this.close();
       this.items = items;
       this.anchor = anchor instanceof Element ? anchor : null;
@@ -1148,6 +1158,7 @@
         return `<button class="menu-item" data-m="${n++}">${lead}<span class="label">${esc(item.label)}</span>${tail}</button>`;
       }).join('');
       this.actionable = actionable;
+      els.menu.style.minWidth = minWidth ? `${minWidth}px` : '';
       els.menu.hidden = false;
       this.mark();
 
