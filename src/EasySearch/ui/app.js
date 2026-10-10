@@ -1487,6 +1487,23 @@
     }
     if (state.view === 'main' && e.target !== els.query && !e.target.closest('.preview, .qchip')) e.preventDefault();
 
+    if (state.view === 'main' && e.button === 0 && e.target.closest('.searchbar') &&
+        !e.target.closest('button, .query-filter-chip')) {
+      const folders = queryHighlight.querySelectorAll('.query-folder-chip');
+      if (folders.length) {
+        const last = folders[folders.length - 1];
+        const rect = last.getBoundingClientRect();
+        if (e.clientX > rect.right) {
+          e.preventDefault();
+          els.query.focus();
+          const end = els.query.value.length;
+          els.query.setSelectionRange(end, end);
+          moveCaretOutsideFolderToken(end);
+          renderQueryCaret();
+        }
+      }
+    }
+
     // Empty parts of the top bar act as a title bar: dragging them moves the window.
     if (e.button === 0 && e.target.closest('.searchbar, .set-head') && !e.target.closest('input, button')) host.post({ type: 'drag' });
   }, true);
