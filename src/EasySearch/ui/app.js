@@ -270,8 +270,8 @@
 
   function renderQueryHighlight() {
     const value = els.query.value;
-    queryHighlight.innerHTML = esc(value).replace(/\b(AND|OR)\b/gi, word =>
-      `<span class="logic-${word.toUpperCase() === 'AND' ? 'and' : 'or'}">${word}</span>`);
+    queryHighlight.innerHTML = esc(value).replace(/\b(AND|OR|NOT)\b/gi, word =>
+      `<span class="logic-${word.toLowerCase()}">${word}</span>`);
     queryHighlight.scrollLeft = els.query.scrollLeft;
   }
 

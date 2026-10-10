@@ -152,6 +152,7 @@ svg.i { flex: none; display: block; }
 .query-highlight { color: var(--text); pointer-events: none; }
 .query-highlight .logic-and { color: #62b5ff; font-weight: 600; }
 .query-highlight .logic-or { color: #c28aff; font-weight: 600; }
+.query-highlight .logic-not { color: #ff9f6e; font-weight: 600; }
 .searchbar-input {
   z-index: 1;
   flex: 1;

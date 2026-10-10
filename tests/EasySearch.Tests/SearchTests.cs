@@ -95,6 +95,8 @@ public sealed class SearchTests : IDisposable
         Assert.Equal(Names("ext:pdf;docx"), Names("ext:pdf OR ext:docx"));
         Assert.Equal(Names("ext:pdf;docx;md"), Names("ext:pdf OR ext:docx OR ext:md"));
         Assert.Equal(["holiday.png"], Names("type:image NOT img"));
+        Assert.Equal(Names("type:image NOT img"), Names("type:image AND NOT img"));
+        Assert.Equal(Names("ext:png OR !ext:pdf"), Names("ext:png OR NOT ext:pdf"));
         Assert.Equal(Names("annual|holiday type:file"), Names("annual OR holiday AND type:file"));
 
         // A quoted word is just a word, and a dangling operator is an error.
