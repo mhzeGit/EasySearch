@@ -1180,9 +1180,6 @@
       case 'openSettings': openSettings(); break;
       case 'setQuery': if (state.view === 'settings') closeSettings(); setQuery(message.query); break;
       case 'shown':
-        els.window.classList.remove('appear');
-        void els.window.offsetWidth;
-        els.window.classList.add('appear');
         if (state.view === 'main') { els.query.focus(); els.query.select(); }
         if (isSearching()) runSearch({ keepSelection: true });
         requestAnimationFrame(() => host.post({ type: 'painted' }));

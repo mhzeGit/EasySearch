@@ -295,6 +295,8 @@ public sealed partial class MainForm : Form
         Native.DwmSetWindowAttribute(Handle, Native.DWMWA_USE_IMMERSIVE_DARK_MODE, ref value, sizeof(int));
         value = Native.DWMWCP_ROUND;
         Native.DwmSetWindowAttribute(Handle, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref value, sizeof(int));
+        value = 1; // no Windows open/close animation: the palette should simply be there
+        Native.DwmSetWindowAttribute(Handle, Native.DWMWA_TRANSITIONS_FORCEDISABLED, ref value, sizeof(int));
         value = dark ? 0x00484848 : 0x00BDBDBD; // COLORREF
         Native.DwmSetWindowAttribute(Handle, Native.DWMWA_BORDER_COLOR, ref value, sizeof(int));
 

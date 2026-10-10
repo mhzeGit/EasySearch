@@ -11,6 +11,7 @@ static class Native
     public const int WS_EX_TOOLWINDOW = 0x00000080;
     public const int WS_CLIPCHILDREN = 0x02000000;
 
+    public const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
     public const int DWMWA_CLOAK = 13;
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;

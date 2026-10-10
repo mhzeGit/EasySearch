@@ -77,8 +77,8 @@ svg.i { flex: none; display: block; }
   overflow: hidden;
 }
 :root[data-backdrop="acrylic"] .window { background: var(--surface-glass); }
-.window.appear { animation: appear .16s var(--ease); }
-@keyframes appear { from { opacity: 0; transform: scale(.985); } }
+/* No entrance animation: the host shows the window fully drawn, and fading the page in on top
+   of that makes it blink. */
 
 /* ---- search bar ------------------------------------------------------------------- */
 
