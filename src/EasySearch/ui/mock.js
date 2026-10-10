@@ -81,7 +81,9 @@ window.createMockHost = () => {
     const started = performance.now();
     const terms = [];
     let extFilter = null, error = null;
-    for (const token of request.query.toLowerCase().match(/"[^"]*"|\S+/g) || []) {
+    // The mock only understands the symbols, so spell the capitalised logic words that way.
+    const spelled = request.query.replace(/\s+OR\s+/g, '|').replace(/\bAND\s+/g, '').replace(/\bNOT\s+/g, '!');
+    for (const token of spelled.toLowerCase().match(/"[^"]*"|\S+/g) || []) {
       const text = token.replace(/"/g, '');
       if (text.startsWith('ext:')) extFilter = text.slice(4).split(/[;,|]/);
       else if (text.startsWith('size:') && !/^size:[<>=]*[\d.]+(b|kb|mb|gb)?/.test(text)) error = `Can't read size "${text.slice(5)}". Try size:>10mb or size:1mb..1gb`;

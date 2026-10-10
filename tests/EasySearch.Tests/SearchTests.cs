@@ -82,6 +82,40 @@ public sealed class SearchTests : IDisposable
     }
 
     [Fact]
+    public void Logic_words_and_friendly_ranges()
+    {
+        // type:.pdf is a literal suffix, same as ext:pdf.
+        Assert.Equal(["Annual Report 2025.pdf"], Names("type:.pdf"));
+        Assert.Equal(Names("ext:pdf;docx"), Names("type:.pdf,.docx"));
+        Assert.Equal(Names("type:document !ext:pdf"), Names("type:document NOT type:.pdf"));
+
+        // AND is implied; OR and NOT are spelled in capitals.
+        Assert.Equal(["Annual Report 2025.pdf"], Names("annual AND report AND type:.pdf"));
+        Assert.Equal(Names("annual|holiday"), Names("annual OR holiday"));
+        Assert.Equal(Names("ext:pdf;docx"), Names("ext:pdf OR ext:docx"));
+        Assert.Equal(Names("ext:pdf;docx;md"), Names("ext:pdf OR ext:docx OR ext:md"));
+        Assert.Equal(["holiday.png"], Names("type:image NOT img"));
+        Assert.Equal(Names("annual|holiday type:file"), Names("annual OR holiday AND type:file"));
+
+        // Quoted and lower-case words are just words, not operators.
+        Assert.Equal(Names("or"), Names("\"OR\""));
+        Assert.Equal(Names("or"), Names("or"));
+        Assert.NotEqual(Names("annual"), Names("annual and"));
+        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "annual OR" }).Error);
+        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "OR annual" }).Error);
+        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "annual NOT" }).Error);
+        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "ext:pdf OR annual" }).Error);
+        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "size:<1kb OR size:>1mb" }).Error);
+
+        // size:min-max, with the unit allowed once, and in either order.
+        var between = Names("size:10kb..1mb");
+        Assert.Equal(between, Names("size:10kb-1mb"));
+        Assert.Equal(between, Names("size:1mb-10kb"));
+        Assert.Equal(Names("size:10kb..1000kb"), Names("size:10-1000kb"));
+        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "size:abc-def" }).Error);
+    }
+
+    [Fact]
     public void Custom_extension_filter()
     {
         // The custom type box: dots, wildcards, case and separators are all forgiven.

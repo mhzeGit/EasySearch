@@ -50,18 +50,24 @@ dotnet publish src/EasySearch -c Release -r win-x64 --self-contained false -o pu
 | --- | --- |
 | `report 2026` | names containing every word, in any order |
 | `jpg\|png` | either one |
-| `!draft` | everything except matches |
+| `!draft`, `NOT draft` | everything except matches |
+| `report OR invoice` | either word (also `ext:pdf OR ext:docx`); `AND` is implied between terms |
 | `"annual report"` | an exact phrase |
 | `*.log`, `img_????.jpg` | wildcards (match the whole name) |
-| `ext:pdf`, `ext:jpg;png` | by extension |
+| `ext:pdf`, `ext:jpg;png`, `type:.pdf` | by extension (a dot after `type:` means a literal suffix) |
 | `type:image` | by kind: `folder`, `file`, `image`, `video`, `audio`, `document`, `code`, `archive`, `app` |
-| `size:>100mb`, `size:1mb..1gb`, `size:empty` | by size (`tiny` … `gigantic` also work) |
+| `size:>100mb`, `size:1mb..1gb`, `size:1mb-10mb`, `size:empty` | by size (`tiny` … `gigantic` also work; `size:1-10mb` borrows the unit) |
 | `dm:today`, `dm:7d`, `dm:2026-03`, `dm:>2026-01-01` | by date modified |
 | `in:C:\Projects` | only inside a folder |
 | `src\ main`, `path:backup` | a backslash (or `path:`) matches against the full path |
 | `regex:^IMG_\d+` | regular expressions |
 
-Operators combine freely: `type:image dm:30d size:>2mb !screenshot`.
+Operators combine freely: `type:image dm:30d size:>2mb !screenshot`, or in words,
+`holiday AND type:.jpg NOT draft`.
+
+`AND`, `OR` and `NOT` are only operators in capitals and outside quotes, so `cats and dogs` still
+searches for all three words. `OR` binds the two things next to it (`a OR b c` is "(a or b) and c")
+and works between two words or two filters of the same kind; it can't be mixed with `NOT`.
 
 ### Keys
 

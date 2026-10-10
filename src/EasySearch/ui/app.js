@@ -185,8 +185,11 @@
   function highlightTerms(query) {
     if (state.options.regex) return [];
     const terms = [];
+    let negated = false;
     for (const token of query.match(/"[^"]*"|\S+/g) || []) {
       let text = token.replace(/"/g, '');
+      if (!token.startsWith('"') && /^(AND|OR|NOT)$/.test(text)) { negated = text === 'NOT'; continue; } // logic words, not names
+      if (negated) { negated = false; continue; } // the word after NOT is excluded, not matched
       if (text.startsWith('!')) continue;
       if (/^(ext|type|kind|size|dm|modified|date|datemodified|in|under|parent|path|regex|folders?|files?):/i.test(text)) continue;
       text = text.replace(/^name:/i, '');
@@ -496,11 +499,12 @@
   const TIPS = [
     ['report 2026', 'Every word, in any order'],
     ['jpg|png', 'Either one'],
-    ['!draft', 'Leave matches out'],
+    ['!draft', 'Leave matches out — or NOT draft'],
+    ['report OR invoice', 'Either word; AND is implied'],
     ['"annual report"', 'An exact phrase'],
     ['*.log', 'Wildcards'],
-    ['ext:pdf', 'By extension'],
-    ['size:>100mb', 'By size, or size:1mb..1gb'],
+    ['type:.pdf', 'By suffix — or ext:pdf'],
+    ['size:1mb-10mb', 'By size, or size:>100mb'],
     ['dm:7d', 'Changed lately — also today, 2026-03'],
     ['in:C:\\Projects', 'Only inside a folder'],
     ['src\\ main', 'A backslash matches the path'],

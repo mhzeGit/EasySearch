@@ -102,7 +102,7 @@ static class QueryParser
         }
         else
         {
-            foreach (var token in Tokenize(text)) ParseToken(q, token, request.MatchPath, now);
+            foreach (var token in ResolveWords(Tokenize(text))) ParseToken(q, token, request.MatchPath, now);
         }
 
         q.Primary = q.Terms.FindIndex(t =>
@@ -110,24 +110,100 @@ static class QueryParser
         return q;
     }
 
-    /// <summary>Splits on whitespace; double quotes keep spaces inside a token and are dropped.</summary>
-    static List<string> Tokenize(string text)
+    /// <summary>
+    /// Splits on whitespace; double quotes keep spaces inside a token and are dropped (the token
+    /// remembers it was quoted, so a quoted "OR" stays a word).
+    /// </summary>
+    static List<(string Text, bool Quoted)> Tokenize(string text)
     {
-        var tokens = new List<string>();
+        var tokens = new List<(string, bool)>();
         var current = new StringBuilder();
-        bool quoted = false;
+        bool inQuotes = false, hadQuotes = false;
         foreach (char c in text)
         {
-            if (c == '"') { quoted = !quoted; continue; }
-            if (char.IsWhiteSpace(c) && !quoted)
+            if (c == '"') { inQuotes = !inQuotes; hadQuotes = true; continue; }
+            if (char.IsWhiteSpace(c) && !inQuotes)
             {
-                if (current.Length > 0) { tokens.Add(current.ToString()); current.Clear(); }
+                if (current.Length > 0) { tokens.Add((current.ToString(), hadQuotes)); current.Clear(); }
+                hadQuotes = false;
                 continue;
             }
             current.Append(c);
         }
-        if (current.Length > 0) tokens.Add(current.ToString());
+        if (current.Length > 0) tokens.Add((current.ToString(), hadQuotes));
         return tokens;
+    }
+
+    static readonly HashSet<string> OperatorKeys = new(StringComparer.OrdinalIgnoreCase)
+        { "ext", "type", "kind", "folder", "folders", "file", "files", "size", "dm", "modified", "date", "datemodified",
+          "in", "under", "parent", "path", "name", "regex" };
+
+    /// <summary>Operators whose values are lists, so <c>a OR b</c> can become <c>key:a|b</c>.</summary>
+    static readonly HashSet<string> JoinableKeys = new(StringComparer.OrdinalIgnoreCase) { "ext", "type", "kind", "path", "name" };
+
+    /// <summary>
+    /// Turns the upper-case words AND, OR and NOT into the symbols the rest of the parser knows:
+    /// AND is already implied between terms, <c>NOT x</c> becomes <c>!x</c> and <c>a OR b</c> becomes
+    /// <c>a|b</c> (or <c>ext:a|b</c> between two filters of the same kind). Quoted words and lower-case
+    /// "and"/"or"/"not" stay plain text, so names such as "cats and dogs" still search as before.
+    /// </summary>
+    static List<string> ResolveWords(List<(string Text, bool Quoted)> tokens)
+    {
+        var result = new List<string>();
+        bool negate = false, or = false;
+        foreach (var (text, quoted) in tokens)
+        {
+            if (!quoted)
+            {
+                if (text == "AND") continue;
+                if (text == "NOT") { negate = !negate; continue; }
+                if (text == "OR")
+                {
+                    if (result.Count == 0 || or) throw new FormatException("OR needs a word on both sides, e.g. report OR invoice");
+                    or = true;
+                    continue;
+                }
+            }
+
+            var token = text;
+            if (negate) token = text.StartsWith('!') ? text[1..] : "!" + text;
+            negate = false;
+
+            if (or)
+            {
+                result[^1] = JoinAlternatives(result[^1], token);
+                or = false;
+            }
+            else
+            {
+                result.Add(token);
+            }
+        }
+        if (or) throw new FormatException("OR needs a word on both sides, e.g. report OR invoice");
+        if (negate) throw new FormatException("NOT needs a word after it, e.g. report NOT draft");
+        return result;
+    }
+
+    static string JoinAlternatives(string left, string right)
+    {
+        const string hint = "OR works between two words, or two filters of the same kind such as ext:pdf OR ext:docx";
+        if (left.StartsWith('!') || right.StartsWith('!'))
+            throw new FormatException("OR can't be combined with NOT. " + hint);
+
+        var leftKey = KeyOf(left);
+        if (leftKey != KeyOf(right) || (leftKey is not null && !JoinableKeys.Contains(leftKey)))
+            throw new FormatException(hint);
+
+        // Same operator on both sides: keep one "key:" and list the values.
+        var rightValue = leftKey is null ? right : right[(right.IndexOf(':') + 1)..];
+        return left + "|" + rightValue;
+    }
+
+    /// <summary>The operator a token starts with ("ext" for "ext:pdf"), or null for plain text.</summary>
+    static string? KeyOf(string token)
+    {
+        int colon = token.IndexOf(':');
+        return colon > 0 && OperatorKeys.Contains(token[..colon]) ? token[..colon].ToLowerInvariant() : null;
     }
 
     static void ParseToken(CompiledQuery q, string token, bool matchPath, DateTime now)
@@ -233,6 +309,12 @@ static class QueryParser
             {
                 case "" or "all" or "any" or "everything":
                     break;
+                case var suffix when suffix.StartsWith('.') || suffix.StartsWith("*."):
+                    // type:.pdf -- a literal file suffix instead of a named kind
+                    var literal = ParseExtensions(suffix);
+                    if (negate) (q.ForbiddenExtensions ??= NewSet()).UnionWith(literal);
+                    else required.UnionWith(literal);
+                    break;
                 case "folder" or "folders" or "dir" or "directory":
                     if (negate) q.FilesOnly = true; else q.FoldersOnly = true;
                     break;
@@ -241,7 +323,7 @@ static class QueryParser
                     break;
                 default:
                     var extensions = FileKinds.Extensions(kind)
-                        ?? throw new FormatException($"Unknown type \"{kind}\". Try image, video, audio, document, code, archive, app or folder");
+                        ?? throw new FormatException($"Unknown type \"{kind}\". Try image, video, audio, document, code, archive, app or folder, or a suffix such as type:.pdf");
                     if (negate) (q.ForbiddenExtensions ??= NewSet()).UnionWith(extensions);
                     else required.UnionWith(extensions);
                     break;
@@ -294,11 +376,32 @@ static class QueryParser
                 else if (value.StartsWith('>')) { if (!TryParseBytes(value[1..], out lo)) return false; lo++; }
                 else if (value.StartsWith('<')) { if (!TryParseBytes(value[1..], out hi)) return false; hi--; }
                 else if (value.StartsWith('=')) { if (!TryParseBytes(value[1..], out lo)) return false; hi = lo; }
+                else if (TryParseDashRange(value, out lo, out hi)) { } // size:1mb-10mb
                 else if (!TryParseBytes(value, out lo)) return false; // bare "size:10mb" means "at least"
                 break;
         }
         min = Math.Max(min, lo);
         max = Math.Min(max, hi);
+        return true;
+    }
+
+    /// <summary>"1mb-10mb", or "1-10mb" where the unit on the right also covers the bare number on the left.</summary>
+    static bool TryParseDashRange(string value, out long lo, out long hi)
+    {
+        lo = 0; hi = long.MaxValue;
+        int dash = value.IndexOf('-', 1);
+        if (dash <= 0 || dash == value.Length - 1) return false;
+
+        var left = value[..dash].Trim();
+        var right = value[(dash + 1)..].Trim();
+        if (left.Length > 0 && char.IsAsciiDigit(left[^1]) && right.Length > 0 && !char.IsAsciiDigit(right[^1]))
+        {
+            int unit = right.Length;
+            while (unit > 0 && char.IsAsciiLetter(right[unit - 1])) unit--;
+            left += right[unit..];
+        }
+        if (!TryParseBytes(left, out lo) || !TryParseBytes(right, out hi)) return false;
+        if (lo > hi) (lo, hi) = (hi, lo);
         return true;
     }
 
