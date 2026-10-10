@@ -336,6 +336,31 @@
     queryHighlight.append(marker);
   }
 
+  function moveCaretOutsideFolderToken(position) {
+    const value = els.query.value;
+    for (const match of value.matchAll(/(^|\s)(in|source|location|where|under|parent):("[^"]*"|\S*)/gi)) {
+      const start = match.index + match[1].length;
+      const end = start + match[0].length - match[1].length;
+      if (position >= start && position <= end) {
+        const after = end;
+        els.query.setSelectionRange(after, after);
+        return after;
+      }
+    }
+    return position;
+  }
+
+  els.query.addEventListener('mouseup', () => {
+    if (els.query.selectionStart === els.query.selectionEnd)
+      moveCaretOutsideFolderToken(els.query.selectionStart);
+  });
+  els.query.addEventListener('keydown', () => {
+    requestAnimationFrame(() => {
+      if (els.query.selectionStart === els.query.selectionEnd)
+        moveCaretOutsideFolderToken(els.query.selectionStart);
+    });
+  });
+
   function removeFilterButton(match) {
     const start = match.index ?? 0;
     const label = match[3] || 'search';
@@ -1448,6 +1473,13 @@
 
   // Keep typing focus in the search box: clicks elsewhere in the main view must not steal it.
   document.addEventListener('mousedown', e => {
+    const folderChip = e.target.closest('.query-folder-filter');
+    if (folderChip) {
+      e.preventDefault();
+      e.stopPropagation();
+      host.post({ type: 'action', action: 'open', path: folderChip.dataset.folderPath });
+      return;
+    }
     if (menu.isOpen && !e.target.closest('#menu')) {
       const reopen = menu.anchor && menu.anchor.contains(e.target);
       menu.close();
@@ -1485,6 +1517,7 @@
       els.query.focus();
       const caret = Number(chip.dataset.filterEnd);
       els.query.setSelectionRange(caret, caret);
+      moveCaretOutsideFolderToken(caret);
       return;
     }
     if (menu.swallow) { menu.swallow = false; e.preventDefault(); e.stopPropagation(); }
