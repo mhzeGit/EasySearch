@@ -362,6 +362,7 @@
   });
 
   function removeFilterButton(match) {
+    if (/^folder$/i.test(match[3])) return '';
     const start = match.index ?? 0;
     const label = match[3] || 'search';
     return `<button type="button" class="filter-remove" data-filter-start="${start}" data-filter-end="${start + match[0].length}" title="Remove ${esc(label)} filter" aria-label="Remove ${esc(label)} filter">${icon('x', 10)}</button>`;
