@@ -403,7 +403,7 @@ public sealed partial class MainForm : Form
 
     void Toggle()
     {
-        if (Visible && Native.GetForegroundWindow() == Handle) Hide();
+        if (Visible) Hide();
         else ShowPalette();
     }
 

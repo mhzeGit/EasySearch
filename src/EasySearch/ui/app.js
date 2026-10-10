@@ -1371,9 +1371,7 @@
         break;
       }
       case 'Escape':
-        // Clear the query first, then hide the window.
-        if (els.query.value) { els.query.value = ''; state.explorerToken = ''; syncQuery(); renderQueryHighlight(); newSearch(); }
-        else host.post({ type: 'hide' });
+        host.post({ type: 'hide' });
         break;
       case 'k': if (!ctrl) return; openActionsMenu(); break;
       case ',': if (!ctrl) return; openSettings(); break;
