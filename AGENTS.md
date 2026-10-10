@@ -2,8 +2,25 @@
 
 EasySearch is a .NET 10 / WinForms + WebView2 file-search palette for Windows. Source layout and usage are in `README.md`.
 
-- Before finishing implementation work, run `dotnet test` from the repository root and make sure it passes. Run the app with `dotnet run --project src/EasySearch -c Release` only when the user asks to see it.
+- Before finishing implementation work, run `dotnet test` from the repository root and make sure it passes.
 - Do not edit, revert or commit changes you did not make. The working tree often holds the user's in-progress edits.
+
+## Build and run after every change
+
+Every change that affects the app (anything under `src\`, `Directory.Build.props`, UI assets) ends with the new build running on this machine, so the user can press the hotkey and try it straight away. Do this after the tests pass and before you report back:
+
+1. Stop the running copy. It locks its own files, so the build fails while it is open, and a second launch only signals the first one and exits:
+   `Stop-Process -Name EasySearch -ErrorAction SilentlyContinue`
+2. Build: `dotnet build src\EasySearch -c Release`. Fix any error or warning before going on.
+3. Start the new build in the background: `Start-Process src\EasySearch\bin\Release\net10.0-windows\EasySearch.exe -ArgumentList '--background'`
+   - `--background` starts it in the notification area without opening the window or taking keyboard focus; the user opens it with the hotkey (Win+Space by default). Do not launch it without that switch unless the user asks to see the window: it would interrupt whatever they are typing.
+   - Start it with `Start-Process` (detached), not `dotnet run`, which would block and tie the app to your shell.
+   - Do not set `EASYSEARCH_DATA` for this launch. It must use the user's real settings and index. That variable is only for your own test runs.
+4. Confirm it is up: `Get-Process EasySearch` shows one process a few seconds later. If it exited, find out why before reporting.
+
+Leave it running when you finish. In your final message, say that the new build is running, or why it is not.
+
+Changes that do not alter the app (README, tests only, this file) do not need this.
 
 ## Keep the GitHub build current
 
