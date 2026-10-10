@@ -280,8 +280,8 @@
       else if (/^(in|source|location|inside|where|under|parent|path)$/i.test(match[3])) {
         const path = match[4].replace(/^"|"$/g, '');
         const label = path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || path;
-        html += `<button type="button" class="query-folder-filter" data-folder-path="${esc(path)}" title="Open ${esc(path)} in File Explorer" aria-label="Open ${esc(path)} in File Explorer">${icon('folder', 14)}<span aria-hidden="true">${esc(label)}</span></button>`;
-      } else html += `<span class="query-filter" aria-hidden="true">${esc(match[0])}</span>`;
+        html += `<span class="query-filter-chip query-folder-chip">${removeFilterButton(match)}<button type="button" class="query-folder-filter" data-folder-path="${esc(path)}" title="Open ${esc(path)} in File Explorer" aria-label="Open ${esc(path)} in File Explorer">${icon('folder', 14)}<span aria-hidden="true">${esc(label)}</span></button></span>`;
+      } else html += `<span class="query-filter-chip">${removeFilterButton(match)}<span class="query-filter" aria-hidden="true">${esc(match[0])}</span></span>`;
       at = index + match[0].length;
     }
     const after = value.slice(at);
@@ -297,6 +297,34 @@
       queryHighlight.scrollLeft = els.query.scrollLeft;
       els.query.style.caretColor = '';
     }
+  }
+
+  function removeFilterButton(match) {
+    const start = match.index ?? 0;
+    const label = match[3] || 'search';
+    return `<button type="button" class="filter-remove" data-filter-start="${start}" data-filter-end="${start + match[0].length}" title="Remove ${esc(label)} filter" aria-label="Remove ${esc(label)} filter">${icon('x', 10)}</button>`;
+  }
+
+  function removeFilterToken(start, end) {
+    let before = els.query.value.slice(0, start);
+    let after = els.query.value.slice(end);
+    const previousOperator = before.match(/\s+(?:AND|OR)\s*$/i);
+    if (previousOperator) before = before.slice(0, previousOperator.index);
+    else {
+      const nextOperator = after.match(/^\s+(?:AND|OR)\b\s*/i);
+      if (nextOperator) after = after.slice(nextOperator[0].length);
+    }
+
+    let query = `${before} ${after}`.replace(/\s+/g, ' ').replace(/\(\s*\)/g, ' ').trim();
+    query = query.replace(/^(?:(?:AND|OR|NOT)\s+)+/i, '').replace(/(?:\s+(?:AND|OR|NOT))+$/i, '').trim();
+    els.query.value = query;
+    if (state.explorerToken && !query.includes(state.explorerToken)) state.explorerToken = '';
+    syncQuery();
+    renderQueryHighlight();
+    newSearch();
+    els.query.focus();
+    const caret = Math.min(start, query.length);
+    els.query.setSelectionRange(caret, caret);
   }
 
   function insertFilterToken(token) {
@@ -1350,6 +1378,13 @@
     if (e.button === 0 && e.target.closest('.searchbar, .set-head') && !e.target.closest('input, button')) host.post({ type: 'drag' });
   }, true);
   document.addEventListener('click', e => {
+    const remove = e.target.closest('.filter-remove');
+    if (remove) {
+      e.preventDefault();
+      e.stopPropagation();
+      removeFilterToken(Number(remove.dataset.filterStart), Number(remove.dataset.filterEnd));
+      return;
+    }
     const folder = e.target.closest('.query-folder-filter');
     if (folder) {
       e.preventDefault();
