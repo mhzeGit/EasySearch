@@ -805,7 +805,7 @@
       });
     }
 
-    if (state.items.length > 0 && !state.pending && !state.error) {
+    if (state.items.length > 0 && !state.error) {
       // Search results often arrive in several partial batches. Replacing the whole list for each
       // batch makes WebView2 briefly clear and reload every row (including its shell icons), which
       // looks like a flash. Reuse rows with the same path and only rebuild rows whose data changed.
