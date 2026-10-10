@@ -142,6 +142,10 @@ to a folder to keep settings and the index there instead of in `%APPDATA%` / `%L
 
 `pwsh tools/make-icon.ps1` regenerates the app icon.
 
+`publish-release.bat` runs the tests, builds a self-contained `win-x64` zip and uploads it to this
+repository's GitHub Release, replacing the previous build. The first run signs in to GitHub and
+creates the repository. Builds are never committed to git.
+
 ## Status
 
 Working and verified: indexing, search and every operator above, change-journal updates (live and
