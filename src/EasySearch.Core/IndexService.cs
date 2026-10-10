@@ -414,8 +414,8 @@ public sealed class IndexService : IDisposable
             var changes = Reconcile(index, scope, paths);
             if (changes.Count > 0)
             {
-                IndexBuilder.ScanNew(index, index.Apply(changes), scope);
-                changed = true;
+                IndexBuilder.ScanNew(index, index.Apply(changes, out bool applied), scope);
+                changed |= applied;
             }
 
             if (changed)

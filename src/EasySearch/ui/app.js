@@ -660,6 +660,10 @@
     state.pending = true;
     state.keepSelection = keepSelection;
     state.searchedVersion = state.status.version;
+    state.searchedItems = state.status.items;
+    state.searchedScanned = state.status.scanned;
+    clearTimeout(refreshTimer);
+    refreshTimer = 0;
     host.post({
       type: 'search',
       id: ++state.searchId,
@@ -684,8 +688,18 @@
 
   function onResults(message) {
     if (message.id !== state.searchId) return;
+    // A refresh searches the entire index again. Its early batches are incomplete rankings,
+    // not changes to the displayed list: applying them removes rows only to add them back.
+    if (message.partial && (state.keepSelection || !state.pending)) return;
     const previous = state.keepSelection ? selectedItem() : null;
     state.pending = message.partial === true;
+    const unchanged = state.keepSelection && state.renderedQuery === state.query &&
+      state.error === (message.error || null) && state.total === (message.total || 0) &&
+      JSON.stringify(state.items) === JSON.stringify(message.items || []);
+    if (unchanged) {
+      scheduleRefresh();
+      return;
+    }
     state.items = message.items || [];
     state.total = message.total || 0;
     state.elapsed = message.elapsedMs || 0;
@@ -700,6 +714,7 @@
     state.selected = selected;
     renderList({ keepScroll: !!state.keepSelection });
     renderCount();
+    if (!state.pending) scheduleRefresh();
   }
 
   // ---- home (empty query) ----------------------------------------------------------
@@ -780,6 +795,7 @@
   }
 
   function renderList({ keepScroll = false } = {}) {
+    state.renderedQuery = state.query;
     const scrollTop = els.list.scrollTop;
     let html = '';
 
@@ -805,7 +821,7 @@
       const terms = highlightTerms(state.query);
       state.items.forEach((item, index) => {
         const key = pathOf(item);
-        const signature = JSON.stringify(item);
+        const signature = JSON.stringify([item, terms]);
         let row = existing.get(key);
         if (row) {
           existing.delete(key);
@@ -817,6 +833,8 @@
             <span class="row-meta"><b>${formatDate(item.modified)}</b><span>${item.isDir ? 'Folder' : formatSize(item.size)}</span></span>
           </div>`;
           row = holder.firstElementChild;
+          if (keepScroll && !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+            row.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 140, easing: 'ease-out' });
         }
         row.dataset.i = index;
         row.classList.toggle('sel', index === state.selected);
@@ -958,7 +976,8 @@
     const text = s.indexing
       ? `Indexing ${number.format(Math.max(s.scanned, s.items))}/${number.format(Math.max(s.scanned, s.items))} items`
       : `${number.format(s.items)} items indexed`;
-    els.status.innerHTML = `<span class="dot"></span><span>${text}</span>`;
+    if (els.status.lastElementChild?.textContent !== text)
+      els.status.innerHTML = `<span class="dot"></span><span>${text}</span>`;
     if (state.view === 'settings' && state.settingsTab === 'index') {
       const target = $('#index-status');
       if (target) target.textContent = indexSummary();
@@ -1170,6 +1189,7 @@
       this.anchor?.classList.remove('open');
       this.anchor = null;
       els.query.focus();
+      scheduleRefresh();
     },
 
     mark() {
@@ -1671,15 +1691,26 @@
   }
 
   let refreshTimer = 0;
+  function needsRefresh() {
+    const s = state.status;
+    return s.version !== state.searchedVersion ||
+      (s.indexing && (s.items !== state.searchedItems || s.scanned !== state.searchedScanned));
+  }
+
+  function scheduleRefresh() {
+    if (refreshTimer || state.view !== 'main' || state.pending || !needsRefresh()) return;
+    // Throttle changing indexes without restarting the timer on every progress notification.
+    refreshTimer = setTimeout(() => {
+      refreshTimer = 0;
+      if (state.view === 'main' && !state.pending && !menu.isOpen && needsRefresh())
+        runSearch({ keepSelection: true });
+    }, state.status.indexing ? 1200 : 400);
+  }
+
   function onStatus(status) {
     state.status = status;
     renderStatus();
-    // Results on screen go stale when the index changes underneath them: refresh quietly.
-    if (state.view === 'main' && !state.pending && status.version !== state.searchedVersion ||
-        (status.indexing && state.view === 'main' && !state.pending && state.items.length < 150)) {
-      clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(() => { if (!menu.isOpen) runSearch({ keepSelection: true }); }, status.indexing ? 1200 : 400);
-    }
+    scheduleRefresh();
   }
 
   host.listen(message => {

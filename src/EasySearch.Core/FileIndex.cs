@@ -326,8 +326,12 @@ public sealed class FileIndex
     /// Returns folders that are new to the index and still need their contents scanned.
     /// </summary>
     public List<(string Path, int Index)> Apply(IReadOnlyList<PendingChange> changes)
+        => Apply(changes, out _);
+
+    public List<(string Path, int Index)> Apply(IReadOnlyList<PendingChange> changes, out bool changed)
     {
         var newDirectories = new List<(string, int)>();
+        changed = false;
         if (changes.Count == 0) return newDirectories;
 
         lock (_gate)
@@ -370,23 +374,30 @@ public sealed class FileIndex
                         bool wasDirectory = (_flags[i] & EntryFlags.Directory) != 0;
                         if (c.Exists && wasDirectory == isDirectory)
                         {
-                            _size[i] = c.Size;
-                            _modified[i] = c.Modified;
-                            _flags[i] = c.Flags | (_flags[i] & EntryFlags.HiddenTree);
+                            var flags = c.Flags | (_flags[i] & EntryFlags.HiddenTree);
+                            if (_size[i] != c.Size || _modified[i] != c.Modified || _flags[i] != flags)
+                            {
+                                _size[i] = c.Size;
+                                _modified[i] = c.Modified;
+                                _flags[i] = flags;
+                                changed = true;
+                            }
                             continue;
                         }
                         KillLocked(i);
+                        changed = true;
                         sweep |= wasDirectory;
                     }
                     if (!c.Exists) continue;
 
                     int index = AppendLocked(c.Parent, c.Name, c.Size, c.Modified, c.Flags);
+                    changed = true;
                     if (isDirectory) newDirectories.Add((c.FullPath, index));
                 }
             }
 
             if (sweep) SweepLocked();
-            _version++;
+            if (changed) _version++;
         }
         return newDirectories;
     }
