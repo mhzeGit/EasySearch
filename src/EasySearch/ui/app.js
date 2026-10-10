@@ -281,7 +281,7 @@
       else if (/^(in|source|location|inside|where|under|parent|path)$/i.test(match[3])) {
         const path = match[4].replace(/^"|"$/g, '');
         const label = path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || path;
-        html += `<span class="query-filter-chip query-folder-chip" data-filter-start="${index}" data-filter-end="${index + match[0].length}">${removeFilterButton(match)}<button type="button" class="query-folder-filter" data-query-start="${index}" data-query-end="${index + match[0].length}" data-folder-path="${esc(path)}" title="Open ${esc(path)} in File Explorer" aria-label="Open ${esc(path)} in File Explorer">${icon('folder', 14)}<span aria-hidden="true">${esc(label)}</span></button></span>`;
+        html += `<span class="query-filter-chip query-folder-chip" data-filter-start="${index}" data-filter-end="${index + match[0].length}"><button type="button" class="query-folder-filter" data-query-start="${index}" data-query-end="${index + match[0].length}" data-folder-path="${esc(path)}" title="Open ${esc(path)} in File Explorer" aria-label="Open ${esc(path)} in File Explorer">${icon('folder', 14)}<span aria-hidden="true">${esc(label)}</span></button></span>`;
       } else html += `<span class="query-filter-chip" data-filter-start="${index}" data-filter-end="${index + match[0].length}">${removeFilterButton(match)}<span class="query-filter" data-query-start="${index}" data-query-end="${index + match[0].length}" aria-hidden="true">${esc(match[0])}</span></span>`;
       at = index + match[0].length;
     }
