@@ -10,7 +10,8 @@ static class FolderNameMatcher
                 && snapshot.Parent[i] >= 0)
                 names.Add(snapshot.Name(i).ToString());
 
-        if (names.TryGetValue(requested, out var exact)) return [exact];
+        // Exact names and longer names must coexist: an exact match elsewhere must not
+        // hide a versioned folder that satisfies the other inside: filters.
         var partial = names.Where(n => n.Contains(requested, StringComparison.OrdinalIgnoreCase)).ToArray();
         if (partial.Length > 0) return partial;
 

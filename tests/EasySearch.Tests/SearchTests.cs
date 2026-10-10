@@ -135,8 +135,38 @@ public sealed class SearchTests : IDisposable
             Names("inside:blahblahfamly inside:unity type:file", index: index));
         Assert.Equal(["matched.txt"],
             Names("inside:blahblahfamly in:\"Unity Projcts\" type:file", index: index));
-        Assert.Equal(["unrelated.txt"], Names("inside:unit type:file", index: index));
+        Assert.Equal(["asset.txt", "matched.txt", "unrelated.txt"], Names("inside:unit type:file", index: index));
         Assert.Empty(Names($"source:\"{Path.Combine(_root, "blahblahfamly")}\"", index: index));
+    }
+
+    [Theory]
+    [InlineData("blahblahfamil", "content.txt,other.txt,reverse.txt,tools.txt")]
+    [InlineData("blahblahfamily", "content.txt,other.txt,reverse.txt,tools.txt")]
+    [InlineData("blahblahfamilyV6", "content.txt,reverse.txt,tools.txt")]
+    public void Inside_exact_names_do_not_hide_partial_matches_in_other_folder_chains(string family, string expected)
+    {
+        Write(@"blahblahfamily\outside.txt", 1, daysOld: 0);
+        Write(@"unity\blahblahfamilyV6\deep\content.txt", 1, daysOld: 0);
+        Write(@"unity\blahblahfamilyV7\other.txt", 1, daysOld: 0);
+        Write(@"blahblahfamilyV6\unity\reverse.txt", 1, daysOld: 0);
+        Write(@"unity-tools\blahblahfamilyV6\tools.txt", 1, daysOld: 0);
+        var index = IndexBuilder.Build(Scope());
+
+        Assert.Equal(expected.Split(','), Names($"inside:unity inside:{family} type:file", index: index));
+        Assert.Equal(expected.Split(','), Names($"in:{family} AND inside:unity type:file", index: index));
+    }
+
+    [Fact]
+    public void Inside_includes_exact_and_partial_matches_within_an_exact_scope()
+    {
+        Write(@"unity\blahblahfamily\exact.txt", 1, daysOld: 0);
+        Write(@"unity\blahblahfamilyV6\version.txt", 1, daysOld: 0);
+        Write(@"unity-tools\blahblahfamilyV6\outside.txt", 1, daysOld: 0);
+        var index = IndexBuilder.Build(Scope());
+        var scope = Path.Combine(_root, "unity");
+
+        Assert.Equal(["exact.txt", "version.txt"],
+            Names("inside:unity inside:blahblahfamily type:file", r => r.Scope = scope, index));
     }
 
     [Fact]
