@@ -683,6 +683,8 @@
         </div>`;
         index++;
       }
+    } else if (state.pending) {
+      html = `<div class="empty"><h2>Searching…</h2></div>`;
     } else if (state.error) {
       html = `<div class="empty error">${icon('info', 34)}<h2>That search isn’t quite right</h2><p>${esc(state.error)}</p></div>`;
     } else if (state.items.length === 0) {
@@ -727,6 +729,7 @@
 
   function renderCount() {
     if (!isSearching() || state.error) { els.count.textContent = ''; return; }
+    if (state.pending) { els.count.textContent = 'Searching…'; return; }
     const total = number.format(state.total);
     const time = state.elapsed < 10 ? state.elapsed.toFixed(1) : Math.round(state.elapsed);
     els.count.textContent = `${total} ${state.total === 1 ? 'result' : 'results'} · ${time} ms`;
@@ -1269,6 +1272,16 @@
   els.query.addEventListener('input', () => {
     renderQueryHighlight();
     syncQuery();
+    // A previous keystroke can finish after the text has changed. Invalidate it now and
+    // replace its rows with a pending state so old one-letter results aren't shown for a
+    // longer query.
+    state.items = [];
+    state.total = 0;
+    state.error = null;
+    state.selected = 0;
+    state.pending = true;
+    renderList();
+    renderCount();
     newSearch();
   });
   els.query.addEventListener('scroll', renderQueryHighlight);
