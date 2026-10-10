@@ -441,6 +441,7 @@
     foldername: 'foldername', inside: 'foldername',
   };
   const FILTER_PATTERN = new RegExp(`(^|\\s)(${Object.keys(FILTER_FORM).join('|')}):("[^"]*"|\\S*)`, 'gi');
+  const FOLDER_PICK_TOKEN = /(^|\\s)folder:\s*$/i;
 
   const pad2 = n => String(n).padStart(2, '0');
 
@@ -949,7 +950,7 @@
       { label: 'File type', sub: '›', run: () => openFilterSubmenu('type') },
       { label: 'Size', sub: '›', run: () => openFilterSubmenu('size') },
       { label: 'Date modified', sub: '›', run: () => openFilterSubmenu('date') },
-      { label: 'Folder', sub: '›', run: () => openFilterSubmenu('place') },
+      { label: 'Folder', sub: 'choose exact directory', run: () => host.post({ type: 'pickFolder', purpose: 'addFilterPlace' }) },
       { label: 'Inside', sub: 'folder name', run: () => insertFilterToken('inside:') },
     ]);
   }
@@ -972,7 +973,6 @@
       if (state.settings.roots.length) items.push({ head: 'Indexed locations' });
       for (const root of state.settings.roots) items.push({ label: root, run: () => setFilter('place', { path: root }) });
       items.push({ sep: true },
-        { label: 'Choose exact folder…', run: () => host.post({ type: 'pickFolder', purpose: 'addFilterPlace' }) },
         { label: 'Type folder path…', sub: 'C:\\Projects', run: () => insertFilterToken('in:') });
     }
     const title = ({ type: 'File type', size: 'Size', date: 'Date modified', place: 'Folder' })[kind];
@@ -1367,6 +1367,16 @@
 
   let searchTimer = 0;
   els.query.addEventListener('input', () => {
+    const folderPick = FOLDER_PICK_TOKEN.exec(els.query.value);
+    if (folderPick) {
+      const query = els.query.value.slice(0, folderPick.index).trimEnd();
+      els.query.value = query;
+      state.folderPickQuery = query;
+      renderQueryHighlight();
+      syncQuery();
+      host.post({ type: 'pickFolder', purpose: 'addFilterPlace' });
+      return;
+    }
     renderQueryHighlight();
     syncQuery();
     // Stop the previous query immediately, then wait for a short pause before scanning again.
@@ -1530,7 +1540,16 @@
   // ---- host messages ---------------------------------------------------------------
 
   function onFolderPicked({ purpose, path }) {
-    if (purpose === 'addFilterPlace') return void setFilter('place', { path });
+    if (purpose === 'addFilterPlace') {
+      const prefix = state.folderPickQuery || '';
+      state.folderPickQuery = '';
+      const token = chipToken(newPlaceChip(path));
+      els.query.value = `${prefix}${prefix ? ' AND ' : ''}${token}`;
+      renderQueryHighlight(); syncQuery(); newSearch();
+      els.query.focus();
+      els.query.setSelectionRange(els.query.value.length, els.query.value.length);
+      return;
+    }
     if (purpose === 'exclude') return addExclusion(path);
     if (purpose === 'root' && !state.settings.roots.some(r => r.toLowerCase() === path.toLowerCase())) {
       state.settings.roots.push(path);

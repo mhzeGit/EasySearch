@@ -70,7 +70,7 @@ dotnet publish src/EasySearch -c Release -r win-x64 --self-contained false -o pu
 | `src\ main`, `path:backup` | a backslash (or `path:`) matches against the full path |
 | `regex:^IMG_\d+` | regular expressions |
 
-Typing `size:`, `type:`, `date:`, `in:` or `inside:` in the box turns it into a small form under the box, so you
+Typing `folder:` opens File Explorer to choose a directory. Typing `size:`, `type:`, `date:`, `in:` or `inside:` in the box turns it into a small form under the box, so you
 can see what to fill in: size takes *at least / at most / between / exactly*, a number and a
 **B / KB / MB / GB / TB** drop-down; type takes names and suffixes with suggestions as you type
 (`blender`, `3D`, `pdf`, `.fbx` …); date takes *in the last N days… / today / this week / on /
