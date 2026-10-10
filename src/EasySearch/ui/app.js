@@ -270,125 +270,90 @@
     menu: $('#menu'), toast: $('#toast'),
   };
   const queryHighlight = $('#query-highlight');
+  const activeFilters = $('#active-filters');
+  let queryComposing = false;
+
+  // The mirror must contain exactly the input's characters and typography. Controls and
+  // abbreviated paths belong in the filter bar, never in the native input's text flow.
+  function queryTokens(value) {
+    const tokens = [];
+    for (const match of value.matchAll(/(?:[^"\s()]|"[^"]*(?:"|$))+/g)) {
+      const text = match[0];
+      const filter = /^(type|ext|kind|size|date|dm|modified|changed|updated|datemodified|in|source|location|inside|foldername|where|under|parent|path|regex|folders?|files?):/i.exec(text);
+      const logic = /^(AND|OR|NOT)$/i.test(text) && (text.toUpperCase() !== 'NOT' || text === 'NOT');
+      if (filter || logic) tokens.push({ start: match.index, end: match.index + text.length,
+        text, key: filter?.[1].toLowerCase(), logic: logic ? text.toLowerCase() : '' });
+    }
+    return tokens;
+  }
+
+  function syncQueryLayout() {
+    const selecting = els.query.selectionStart !== els.query.selectionEnd;
+    els.query.parentElement.classList.toggle('native-text', queryComposing || selecting);
+    queryHighlight.scrollLeft = els.query.scrollLeft;
+    if (typeof renderPrediction === 'function') renderPrediction();
+  }
 
   function renderQueryHighlight() {
     const value = els.query.value;
-    const syntax = /(^|\s)(AND|OR|NOT)(?=\s|$)|\b(type|ext|kind|size|date|dm|modified|changed|updated|datemodified|in|source|location|inside|foldername|where|under|parent|path|regex|folders?|files?):("[^"]*"|\S*)/gi;
+    const tokens = queryTokens(value);
+    const span = (text, start, end, className = '') => '<span class="' + className +
+      '" data-query-start="' + start + '" data-query-end="' + end + '">' + esc(text) + '</span>';
     let html = '', at = 0;
-    for (const match of value.matchAll(syntax)) {
-      const index = match.index ?? 0;
-      const before = value.slice(at, index);
-      if (before) html += `<span aria-hidden="true" data-query-start="${at}" data-query-end="${index}">${esc(before)}</span>`;
-      if (match[2]) html += `<span aria-hidden="true" data-query-start="${index}" data-query-end="${index + match[0].length}">${esc(match[1])}<span class="logic-${match[2].toLowerCase()}">${esc(match[2])}</span></span>`;
-      else if (/^(in|source|location|inside|where|under|parent|path)$/i.test(match[3])) {
-        const path = match[4].replace(/^"|"$/g, '');
-        const label = path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || path;
-        html += `<span class="query-filter-chip query-folder-chip" data-filter-start="${index}" data-filter-end="${index + match[0].length}">${removeFilterButton(match)}<button type="button" class="query-folder-filter" data-query-start="${index}" data-query-end="${index + match[0].length}" data-folder-path="${esc(path)}" title="Open ${esc(path)} in File Explorer" aria-label="Open ${esc(path)} in File Explorer">${icon('folder', 14)}<span aria-hidden="true">${esc(label)}</span></button></span>`;
-      } else html += `<span class="query-filter-chip" data-filter-start="${index}" data-filter-end="${index + match[0].length}">${removeFilterButton(match)}<span class="query-filter" data-query-start="${index}" data-query-end="${index + match[0].length}" aria-hidden="true">${esc(match[0])}</span></span>`;
-      at = index + match[0].length;
+    for (const token of tokens) {
+      if (token.start > at) html += span(value.slice(at, token.start), at, token.start);
+      html += span(token.text, token.start, token.end, token.key ? 'query-filter' : 'logic-' + token.logic);
+      at = token.end;
     }
-    const after = value.slice(at);
-    if (after) html += `<span aria-hidden="true" data-query-start="${at}" data-query-end="${value.length}">${esc(after)}</span>`;
-    queryHighlight.innerHTML = html;
-    const hasFilterChip = queryHighlight.querySelector('.query-filter-chip');
-    if (hasFilterChip) {
-      queryHighlight.scrollLeft = 0;
-      els.query.scrollLeft = 0;
-      els.query.style.caretColor = document.activeElement === els.query ? 'transparent' : '';
-      renderQueryCaret();
-    } else {
-      queryHighlight.scrollLeft = els.query.scrollLeft;
-      els.query.style.caretColor = '';
-    }
-  }
+    if (at < value.length) html += span(value.slice(at), at, value.length);
+    if (queryHighlight.innerHTML !== html) queryHighlight.innerHTML = html;
 
-  function renderQueryCaret() {
-    queryHighlight.querySelector('.query-caret')?.remove();
-    if (document.activeElement !== els.query || els.query.selectionStart !== els.query.selectionEnd) return;
-    const caret = els.query.selectionStart;
-    const chip = [...queryHighlight.querySelectorAll('.query-filter-chip')].find(el =>
-      caret >= Number(el.dataset.filterStart) && caret <= Number(el.dataset.filterEnd));
-    const target = chip?.querySelector('.query-filter') || [...queryHighlight.querySelectorAll('[data-query-start]')].find(el =>
-      caret >= Number(el.dataset.queryStart) && caret <= Number(el.dataset.queryEnd));
-    if (!target) return;
-
-    const start = Number(target.dataset.queryStart ?? chip.dataset.filterStart);
-    const end = Number(target.dataset.queryEnd ?? chip.dataset.filterEnd);
-    const isFolderChip = chip?.classList.contains('query-folder-chip');
-    const offset = isFolderChip ? Number.MAX_SAFE_INTEGER : Math.max(0, Math.min(caret - start, end - start));
-    const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
-    let node = walker.nextNode();
-    let remaining = offset;
-    let lastNode = node;
-    while (node && remaining > node.length) { remaining -= node.length; lastNode = node; node = walker.nextNode(); }
-    if (!node && isFolderChip) { node = lastNode; remaining = node?.length ?? 0; }
-    if (!node) return;
-
-    const range = document.createRange();
-    range.setStart(node, remaining);
-    range.collapse(true);
-    const rect = range.getBoundingClientRect();
-    const parent = queryHighlight.getBoundingClientRect();
-    if (!rect || !parent) return;
-    const marker = document.createElement('span');
-    marker.className = 'query-caret';
-    marker.setAttribute('aria-hidden', 'true');
-    const endGap = chip && caret >= Number(chip.dataset.filterEnd) ? 5 : 0;
-    marker.style.left = `${rect.left - parent.left + queryHighlight.scrollLeft + endGap}px`;
-    queryHighlight.append(marker);
-  }
-
-  function moveCaretOutsideFolderToken(position) {
-    const value = els.query.value;
-    for (const match of value.matchAll(/(^|\s)(in|source|location|where|under|parent):("[^"]*"|\S*)/gi)) {
-      const start = match.index + match[1].length;
-      const end = start + match[0].length - match[1].length;
-      if (position >= start && position <= end) {
-        const after = end;
-        els.query.setSelectionRange(after, after);
-        return after;
-      }
-    }
-    return position;
-  }
-
-  els.query.addEventListener('mouseup', () => {
-    if (els.query.selectionStart === els.query.selectionEnd)
-      moveCaretOutsideFolderToken(els.query.selectionStart);
-  });
-  els.query.addEventListener('keydown', () => {
-    requestAnimationFrame(() => {
-      if (els.query.selectionStart === els.query.selectionEnd)
-        moveCaretOutsideFolderToken(els.query.selectionStart);
-    });
-  });
-
-  function removeFilterButton(match) {
-    const start = match.index ?? 0;
-    const label = match[3] || 'search';
-    return `<button type="button" class="filter-remove" data-filter-start="${start}" data-filter-end="${start + match[0].length}" title="Remove ${esc(label)} filter" aria-label="Remove ${esc(label)} filter">${icon('x', 10)}</button>`;
+    const controls = tokens.filter(token => token.key && token.key !== 'folder').map(token => {
+      const path = token.text.slice(token.key.length + 1).replace(/^"|"$/g, '');
+      const folder = /^(in|source|location|where|under|parent)$/.test(token.key) && path;
+      const label = folder ? path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path : token.text;
+      const content = folder
+        ? '<button type="button" class="query-folder-filter" data-folder-path="' + esc(path) +
+          '" title="Open ' + esc(path) + ' in File Explorer" aria-label="Open ' + esc(path) +
+          ' in File Explorer">' + icon('folder', 14) + '<span>' + esc(label) + '</span></button>'
+        : '<button type="button" class="filter-edit" data-filter-start="' + token.start +
+          '" data-filter-end="' + token.end + '" title="Edit ' + esc(token.text) +
+          '" aria-label="Edit ' + esc(token.text) + '">' + esc(label) + '</button>';
+      return '<span class="query-filter-chip">' + content +
+        '<button type="button" class="filter-remove" data-filter-start="' + token.start +
+        '" data-filter-end="' + token.end + '" title="Remove ' + esc(token.key) +
+        ' filter" aria-label="Remove ' + esc(token.key) + ' filter">' + icon('x', 10) + '</button></span>';
+    }).join('');
+    if (activeFilters.innerHTML !== controls) activeFilters.innerHTML = controls;
+    syncQueryLayout();
   }
 
   function removeFilterToken(start, end) {
-    let before = els.query.value.slice(0, start);
-    let after = els.query.value.slice(end);
-    const previousOperator = before.match(/\s+(?:AND|OR)\s*$/i);
-    if (previousOperator) before = before.slice(0, previousOperator.index);
-    else {
-      const nextOperator = after.match(/^\s+(?:AND|OR)\b\s*/i);
-      if (nextOperator) after = after.slice(nextOperator[0].length);
+    let before = els.query.value.slice(0, start).trimEnd();
+    let after = els.query.value.slice(end).trimStart();
+    // Clean only the removed term's boundary. Global whitespace replacement corrupts
+    // quoted names and paths, and global operator cleanup changes unrelated groups.
+    while (true) {
+      if (/(^|[\s(])NOT$/.test(before)) before = before.slice(0, -3).trimEnd();
+      else if (before.endsWith('(') && after.startsWith(')')) {
+        before = before.slice(0, -1).trimEnd();
+        after = after.slice(1).trimStart();
+      } else break;
     }
-
-    let query = `${before} ${after}`.replace(/\s+/g, ' ').replace(/\(\s*\)/g, ' ').trim();
-    query = query.replace(/^(?:(?:AND|OR|NOT)\s+)+/i, '').replace(/(?:\s+(?:AND|OR|NOT))+$/i, '').trim();
+    const previousOperator = before.match(/(^|[\s(])(?:AND|OR|&&|\|\|)$/i);
+    if (previousOperator) before = before.slice(0, previousOperator.index + previousOperator[1].length).trimEnd();
+    else after = after.replace(/^(?:AND|OR|&&|\|\|)(?=\s|\)|$)\s*/i, '');
+    const separator = before && after && !before.endsWith('(') && !after.startsWith(')') ? ' ' : '';
+    const query = before + separator + after;
     els.query.value = query;
     if (state.explorerToken && !query.includes(state.explorerToken)) state.explorerToken = '';
     syncQuery();
     renderQueryHighlight();
     newSearch();
     els.query.focus();
-    const caret = Math.min(start, query.length);
+    const caret = before.length + separator.length;
     els.query.setSelectionRange(caret, caret);
+    syncQueryLayout();
   }
 
   function insertFilterToken(token) {
@@ -1493,13 +1458,18 @@
       newSearch();
     }, 120);
   });
-  els.query.addEventListener('scroll', renderQueryHighlight);
-  els.query.addEventListener('select', renderQueryCaret);
-  els.query.addEventListener('keyup', renderQueryCaret);
-  els.query.addEventListener('click', renderQueryCaret);
-  els.query.addEventListener('focus', renderQueryHighlight);
-  els.query.addEventListener('blur', () => { els.query.style.caretColor = ''; queryHighlight.querySelector('.query-caret')?.remove(); });
-  document.addEventListener('selectionchange', renderQueryCaret);
+  els.query.addEventListener('scroll', syncQueryLayout);
+  els.query.addEventListener('focus', syncQueryLayout);
+  els.query.addEventListener('blur', () => {
+    if (typeof clearPrediction === 'function') clearPrediction();
+  });
+  els.query.addEventListener('select', syncQueryLayout);
+  document.addEventListener('selectionchange', () => {
+    if (document.activeElement === els.query) syncQueryLayout();
+  });
+  els.query.addEventListener('compositionstart', () => { queryComposing = true; syncQueryLayout(); });
+  els.query.addEventListener('compositionend', () => { queryComposing = false; renderQueryHighlight(); });
+  new ResizeObserver(syncQueryLayout).observe(els.query);
   renderQueryHighlight();
 
   $('#btn-add-filter').addEventListener('click', openAddFilters);
@@ -1548,36 +1518,12 @@
 
   // Keep typing focus in the search box: clicks elsewhere in the main view must not steal it.
   document.addEventListener('mousedown', e => {
-    const folderChip = e.target.closest('.query-folder-filter');
-    if (folderChip) {
-      e.preventDefault();
-      e.stopPropagation();
-      host.post({ type: 'action', action: 'open', path: folderChip.dataset.folderPath });
-      return;
-    }
     if (menu.isOpen && !e.target.closest('#menu')) {
       const reopen = menu.anchor && menu.anchor.contains(e.target);
       menu.close();
       if (reopen) { e.preventDefault(); e.stopPropagation(); menu.swallow = true; }
     }
     if (state.view === 'main' && e.target !== els.query && !e.target.closest('.preview, .qchip')) e.preventDefault();
-
-    if (state.view === 'main' && e.button === 0 && e.target.closest('.searchbar') &&
-        !e.target.closest('button, .query-filter-chip')) {
-      const folders = queryHighlight.querySelectorAll('.query-folder-chip');
-      if (folders.length) {
-        const last = folders[folders.length - 1];
-        const rect = last.getBoundingClientRect();
-        if (e.clientX > rect.right) {
-          e.preventDefault();
-          els.query.focus();
-          const end = els.query.value.length;
-          els.query.setSelectionRange(end, end);
-          moveCaretOutsideFolderToken(end);
-          renderQueryCaret();
-        }
-      }
-    }
 
     // Empty parts of the top bar act as a title bar: dragging them moves the window.
     if (e.button === 0 && e.target.closest('.searchbar, .set-head') && !e.target.closest('input, button')) host.post({ type: 'drag' });
@@ -1597,19 +1543,13 @@
       host.post({ type: 'action', action: 'open', path: folder.dataset.folderPath });
       return;
     }
-    const chip = e.target.closest('.query-filter-chip');
-    if (chip) {
+    const edit = e.target.closest('.filter-edit');
+    if (edit) {
       e.preventDefault();
       e.stopPropagation();
-      const folderChip = chip.querySelector('.query-folder-filter');
-      if (folderChip) {
-        host.post({ type: 'action', action: 'open', path: folderChip.dataset.folderPath });
-        return;
-      }
       els.query.focus();
-      const caret = Number(chip.dataset.filterEnd);
-      els.query.setSelectionRange(caret, caret);
-      moveCaretOutsideFolderToken(caret);
+      els.query.setSelectionRange(Number(edit.dataset.filterStart), Number(edit.dataset.filterEnd));
+      syncQueryLayout();
       return;
     }
     if (menu.swallow) { menu.swallow = false; e.preventDefault(); e.stopPropagation(); }
@@ -1617,6 +1557,7 @@
   document.addEventListener('contextmenu', e => e.preventDefault());
 
   document.addEventListener('keydown', e => {
+    if (e.isComposing || queryComposing || e.keyCode === 229) return;
     if (state.recording) return recordKey(e);
     if (menu.isOpen) {
       if (['ArrowDown', 'ArrowUp', 'Enter', 'Escape', 'Tab'].includes(e.key)) { e.preventDefault(); e.stopPropagation(); menu.key(e); }
