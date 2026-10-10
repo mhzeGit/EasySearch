@@ -212,32 +212,41 @@ public static class SearchEngine
         var names = snapshot.Names;
         var starts = snapshot.NameStart;
         int end = starts[to - 1] + snapshot.NameLength[to - 1];
-        int entry = from;
+        int searchFrom = starts[from];
+        int lastEvaluatedEntry = from - 1;
 
         int matchesSinceProgress = 0;
-        while (entry < to)
+        while (searchFrom < end)
         {
             if (cancel.IsCancellationRequested) return;
-            int position = starts[entry];
-            int found = names.AsSpan(position, end - position).IndexOf(driver, comparison);
+            int found = names.AsSpan(searchFrom, end - searchFrom).IndexOf(driver, comparison);
             if (found < 0) return;
-            found += position;
+            found += searchFrom;
 
             // Last entry whose name starts at or before the match.
-            int e = Array.BinarySearch(starts, entry, to - entry, found);
+            int e = Array.BinarySearch(starts, from, to - from, found);
             if (e < 0) e = ~e - 1;
 
-            // A match that runs past the end of the name straddles two entries: not a real match.
-            if (found + driver.Length <= starts[e] + snapshot.NameLength[e] && matcher.IsMatch(e, local, out int score))
+            int nameEnd = starts[e] + snapshot.NameLength[e];
+            // The name buffer packs entries back to back. A substring found across two adjacent
+            // names is not a real hit; skip past that whole name instead of checking every entry
+            // one by one (common words can otherwise make this path quadratic).
+            if (e > lastEvaluatedEntry && found + driver.Length <= nameEnd)
             {
-                local.Add(new Hit(e, score));
-                if (++matchesSinceProgress >= 128)
+                lastEvaluatedEntry = e;
+                if (matcher.IsMatch(e, local, out int score))
                 {
-                    matchesSinceProgress = 0;
-                    progress?.Invoke();
+                    local.Add(new Hit(e, score));
+                    if (++matchesSinceProgress >= 128)
+                    {
+                        matchesSinceProgress = 0;
+                        progress?.Invoke();
+                    }
                 }
             }
-            entry = e + 1;
+            // Search forward through the packed buffer once. Re-scanning the entire remaining
+            // suffix from the next entry for every occurrence makes common queries quadratic.
+            searchFrom = found + 1;
         }
     }
 

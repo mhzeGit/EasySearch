@@ -63,6 +63,7 @@ public sealed class SearchTests : IDisposable
     public void Empty_query_returns_everything_and_text_keeps_the_full_word()
     {
         Write(@"docs\forklift.txt", 12, daysOld: 0);
+        Write(@"docs\fork-fork-fork.txt", 12, daysOld: 0);
         Write(@"docs\f.txt", 12, daysOld: 0);
         var index = IndexBuilder.Build(Scope());
 
@@ -73,9 +74,9 @@ public sealed class SearchTests : IDisposable
 
         SearchResult? partial = null;
         var forks = SearchEngine.Run(index, new SearchRequest { Query = "fork", Sort = "name" }, onProgress: result => partial = result);
-        Assert.Equal(["forklift.txt"], forks.Items.Select(item => item.Name));
+        Assert.Equal(["fork-fork-fork.txt", "forklift.txt"], forks.Items.Select(item => item.Name));
         Assert.NotNull(partial);
-        Assert.Equal(["forklift.txt"], partial.Items.Select(item => item.Name));
+        Assert.Equal(["fork-fork-fork.txt", "forklift.txt"], partial.Items.Select(item => item.Name));
         var folders = SearchEngine.Run(index, new SearchRequest { Query = "type:folder", Limit = 1000 });
         Assert.Null(folders.Error);
         Assert.NotEmpty(folders.Items);
