@@ -70,7 +70,7 @@ svg.i { flex: none; display: block; }
 .window {
   position: relative;
   display: grid;
-  grid-template-rows: auto 44px minmax(0, 1fr) 38px;
+  grid-template-rows: auto minmax(0, 1fr) 38px;
   width: 100vw;
   height: 100vh;
   background: var(--surface);
@@ -86,54 +86,28 @@ svg.i { flex: none; display: block; }
 .searchbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   height: 62px;
   padding: 0 14px 0 20px;
 }
 
-/* size: and type: become small forms under the text box. */
-.qchips { display: flex; flex-wrap: wrap; gap: 5px 8px; padding: 0 14px 9px 54px; }
-.qchips[hidden] { display: none; }
-.qchip {
+.add-filter-btn {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 3px 3px 10px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
-  animation: pop .12s var(--ease);
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text-2);
+  background: var(--fill);
+  font-size: 12px;
+  white-space: nowrap;
 }
-.qchip:focus-within { box-shadow: inset 0 0 0 1.5px var(--accent); }
-.qchip.invalid { box-shadow: inset 0 0 0 1.5px #f04438; }
-.qchip-label { color: color-mix(in srgb, var(--accent) 80%, var(--text)); font-weight: 600; font-size: 11.5px; letter-spacing: .02em; }
-.qchip-text { color: var(--text-3); font-size: 11.5px; }
-.qchip input, .qsel {
-  height: 18px;
-  border: 0;
-  border-radius: 9px;
-  background: var(--fill-strong);
-  color: var(--text);
-  font-size: 11.5px;
-  line-height: 1;
-  min-width: 0;
-}
-.qsel { display: flex; align-items: center; gap: 3px; padding: 0 5px 0 8px; white-space: nowrap; }
-.qsel svg { opacity: .6; }
-.qsel:hover, .qsel.open { background: color-mix(in srgb, var(--accent) 22%, var(--fill-strong)); }
-.qchip input { padding: 0 8px; cursor: text; user-select: text; }
-.qchip input::placeholder { color: var(--text-3); }
-.qchip input.num { width: 54px; text-align: right; font-variant-numeric: tabular-nums; }
-.qchip input.wide { width: 230px; }
-.qchip input.date { width: 112px; padding: 0 5px 0 7px; font-variant-numeric: tabular-nums; }
-.qchip input[type="date"]::-webkit-calendar-picker-indicator { width: 12px; margin: 0 0 0 2px; padding: 0; opacity: .7; cursor: pointer; }
-.qchip input[type="date"]::-webkit-datetime-edit { padding: 0; }
-.qchip-x { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 9px; color: var(--text-2); }
-.qchip-x:hover { background: var(--fill-strong); color: var(--text); }
-.suggest { min-width: 260px; max-height: 300px; }
-.suggest .menu-item { height: auto; min-height: 30px; padding-top: 4px; padding-bottom: 4px; }
-.suggest .label b { font-weight: 600; }
-.suggest .sub { max-width: 150px; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 11px; }
+.add-filter-btn [data-icon] { display: flex; }
+.add-filter-btn [data-icon]:last-child { opacity: .6; }
+.add-filter-btn:hover, .add-filter-btn.open { color: var(--text); background: var(--fill-strong); }
+.add-filter-btn .i { width: 14px; height: 14px; }
 .searchbar-icon { color: var(--text-2); display: flex; }
 .searchbar-query { position: relative; flex: 1; min-width: 0; height: 40px; }
 .query-highlight, .searchbar-input {
@@ -150,6 +124,7 @@ svg.i { flex: none; display: block; }
   overflow: hidden;
 }
 .query-highlight { color: var(--text); pointer-events: none; }
+.query-highlight .query-filter { color: color-mix(in srgb, var(--accent) 78%, var(--text)); background: color-mix(in srgb, var(--accent) 15%, transparent); border-radius: 4px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent); }
 .query-highlight .logic-and { color: #62b5ff; font-weight: 600; }
 .query-highlight .logic-or { color: #c28aff; font-weight: 600; }
 .query-highlight .logic-not { color: #ff9f6e; font-weight: 600; }
@@ -186,17 +161,6 @@ svg.i { flex: none; display: block; }
 
 /* ---- filters ---------------------------------------------------------------------- */
 
-.filters {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 0 12px 0 14px;
-  border-bottom: 1px solid var(--line);
-}
-.kinds { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
-
-.filter-menus { display: flex; gap: 6px; flex: none; }
 .chip {
   display: flex;
   align-items: center;

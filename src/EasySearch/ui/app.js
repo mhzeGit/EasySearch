@@ -243,8 +243,8 @@
     view: 'main',
     settingsTab: 'general',
     recording: false,
-    query: '', // everything searched for: the size:/type: forms in chips, then the text box
-    chips: [], // the filter forms; type, size, date and folder filters all live here
+    query: '', // the complete query, including inline filter terms
+    explorerToken: '',
     types: [], // named types from the host: { name, label, exts, kind }
     sort: 'relevance',
     options: { matchCase: false, matchPath: false, regex: false },
@@ -262,7 +262,6 @@
 
   const els = {
     window: $('#window'), query: $('#query'), count: $('#count'), list: $('#list'),
-    chips: $('#qchips'), suggest: $('#suggest'),
     preview: $('#preview'), status: $('#status'), hints: $('#hints'), settings: $('#settings'),
     menu: $('#menu'), toast: $('#toast'),
   };
@@ -270,9 +269,33 @@
 
   function renderQueryHighlight() {
     const value = els.query.value;
-    queryHighlight.innerHTML = esc(value).replace(/\b(AND|OR|NOT)\b/gi, word =>
-      `<span class="logic-${word.toLowerCase()}">${word}</span>`);
+    const syntax = /(^|\s)(AND|OR|NOT)(?=\s|$)|\b(type|ext|kind|size|date|dm|modified|changed|updated|datemodified|in|source|location|inside|where|under|parent|path|regex|folders?|files?):("[^"]*"|\S*)/gi;
+    let html = '', at = 0;
+    for (const match of value.matchAll(syntax)) {
+      const index = match.index ?? 0;
+      html += esc(value.slice(at, index));
+      if (match[2]) html += `${esc(match[1])}<span class="logic-${match[2].toLowerCase()}">${esc(match[2])}</span>`;
+      else html += `<span class="query-filter">${esc(match[0])}</span>`;
+      at = index + match[0].length;
+    }
+    queryHighlight.innerHTML = html + esc(value.slice(at));
     queryHighlight.scrollLeft = els.query.scrollLeft;
+  }
+
+  function insertFilterToken(token) {
+    const value = els.query.value;
+    const start = els.query.selectionStart ?? value.length;
+    const end = els.query.selectionEnd ?? start;
+    const left = value.slice(0, start), right = value.slice(end);
+    const before = left && !/\s$/.test(left) ? ' ' : '';
+    const after = right && !/^\s/.test(right) ? ' ' : '';
+    els.query.value = left + before + token + after + right;
+    const caret = left.length + before.length + token.length;
+    els.query.focus();
+    els.query.setSelectionRange(caret, caret);
+    renderQueryHighlight();
+    syncQuery();
+    newSearch();
   }
 
   const iconCache = new Map(); // extension -> icon URL, so one request serves every file of a type
@@ -293,11 +316,9 @@
   const thumbUrl = item =>
     `https://images.easysearch.example/thumb?s=512&d=${item.isDir ? 1 : 0}&p=${encodeURIComponent(pathOf(item))}&m=${item.modified}`;
 
-  // ---- inline filters: size: and type: typed in the box turn into small forms -------------
-  //
-  // The text box only holds free text. Each size:/type: filter lives in state.chips, is drawn as a
-  // form under the box, and is written back into state.query as ordinary query syntax, so the
-  // search itself (and recent searches, tips, the CLI) keep speaking one language.
+  // ---- inline filter tokens --------------------------------------------------------------
+  // The editor contains the complete query. Filter terms are regular query tokens with a visual
+  // treatment, so operators and text can be inserted before or after any filter.
 
   const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
   const SIZE_OPS = [
@@ -508,311 +529,15 @@
     }
   }
 
-  function chipValid(chip) {
-    if (chip.kind === 'date') return chip.op !== 'last' || !chip.n.trim() || /^\d+$/.test(chip.n.trim());
-    if (chip.kind !== 'size') return true;
-    const bad = text => text.trim() && !amount(text);
-    return !(bad(chip.lo) || (chip.op === 'between' && bad(chip.hi)));
-  }
-
-  /** state.query = the forms, then whatever is typed in the box. */
+  /** The search box contains the complete query; filter pills are only a visual treatment. */
   function syncQuery() {
-    state.query = [...state.chips.map(chipToken).filter(Boolean), els.query.value.trim()].filter(Boolean).join(' ');
-    renderFilters(); // the filter bar always reads back what the forms say
+    state.query = els.query.value.trim();
+    renderFilters();
   }
-
-  /** A drop-down button; it opens the app's own menu instead of the system list, which can't be themed. */
-  const choice = (field, label, name) =>
-    `<button class="qsel" data-f="${field}" aria-haspopup="menu" aria-label="${name}"><span>${esc(label)}</span>${icon('chevron', 12)}</button>`;
-
-  function chipHtml(chip) {
-    const remove = `<button class="qchip-x" data-f="remove" title="Remove" aria-label="Remove filter">${icon('x', 14)}</button>`;
-    const attrs = 'spellcheck="false" autocomplete="off" autocapitalize="off"';
-    if (chip.kind === 'type')
-      return `<div class="qchip" data-id="${chip.id}"><span class="qchip-label">Type</span>
-        <input class="wide" data-f="text" value="${esc(chip.text)}" placeholder="blender, image, 3D, pdf, .fbx" aria-label="File types" ${attrs}>${remove}</div>`;
-
-    if (chip.kind === 'place')
-      return `<div class="qchip" data-id="${chip.id}"><span class="qchip-label">Folder</span>
-        <input class="wide" data-f="path" value="${esc(chip.path)}" placeholder="C:\\Projects  (or pick one)" aria-label="Folder to search in" ${attrs}>
-        <button class="qsel" data-f="places" aria-haspopup="menu" aria-label="Choose a folder">${icon('folder', 13)}${icon('chevron', 12)}</button>${remove}</div>`;
-
-    if (chip.kind === 'date') {
-      const day = (field, value, name) => `<input type="date" class="date" data-f="${field}" value="${esc(value)}" aria-label="${name}">`;
-      let fields = '';
-      if (chip.op === 'last')
-        fields = `<input class="num" data-f="n" value="${esc(chip.n)}" placeholder="7" inputmode="numeric" aria-label="How many" ${attrs}>
-          ${choice('unit', DATE_UNITS.find(u => u.id === chip.unit).label, 'Unit')}`;
-      else if (['on', 'before', 'after'].includes(chip.op)) fields = day('d1', chip.d1, 'Date');
-      else if (chip.op === 'between') fields = `${day('d1', chip.d1, 'From')}<span class="qchip-text">and</span>${day('d2', chip.d2, 'To')}`;
-      return `<div class="qchip${chipValid(chip) ? '' : ' invalid'}" data-id="${chip.id}"><span class="qchip-label">Date</span>
-        ${choice('op', DATE_OPS.find(o => o.id === chip.op).label, 'When')}${fields}${remove}</div>`;
-    }
-
-    const between = chip.op === 'between';
-    return `<div class="qchip${chipValid(chip) ? '' : ' invalid'}" data-id="${chip.id}"><span class="qchip-label">Size</span>
-      ${choice('op', SIZE_OPS.find(o => o.id === chip.op).label, 'Comparison')}
-      <input class="num" data-f="lo" value="${esc(chip.lo)}" placeholder="${between ? 'min' : 'size'}" inputmode="decimal" aria-label="${between ? 'Minimum size' : 'Size'}" ${attrs}>
-      ${choice('loUnit', chip.loUnit, 'Unit')}
-      ${between ? `<span class="qchip-text">and</span>
-      <input class="num" data-f="hi" value="${esc(chip.hi)}" placeholder="max" inputmode="decimal" aria-label="Maximum size" ${attrs}>
-      ${choice('hiUnit', chip.hiUnit, 'Unit')}` : ''}
-      ${remove}</div>`;
-  }
-
-  function renderChips() {
-    hideSuggestions();
-    els.chips.hidden = state.chips.length === 0;
-    els.chips.innerHTML = state.chips.map(chipHtml).join('');
-  }
-
-  function focusChip(chip) {
-    const root = $(`.qchip[data-id="${chip.id}"]`, els.chips);
-    const field = root && $('[data-f="lo"], [data-f="text"], [data-f="n"], [data-f="d1"], [data-f="path"]', root);
-    if (!field) return els.query.focus();
-    field.focus();
-    try { field.select(); } catch { /* date inputs have no text to select */ }
-  }
-
-  const chipById = id => state.chips.find(c => c.id === +id);
-
-  function chipChanged(root) {
-    const chip = chipById(root.dataset.id);
-    root.classList.toggle('invalid', !chipValid(chip));
-    syncQuery();
-    newSearch();
-  }
-
-  function removeChip(id) {
-    state.chips = state.chips.filter(c => c.id !== +id);
-    renderChips();
-    syncQuery();
-    els.query.focus();
-    newSearch();
-  }
-
-  /** Called from the text box: turns a freshly typed "size:" or "type:" into a form and moves into it. */
-  function convertTypedFilters() {
-    if (state.options.regex) return false;
-
-    // Forms are AND-ed, so the moment OR / NOT / parentheses are typed everything goes back to plain text.
-    if (state.chips.length && hasLogic(els.query.value)) {
-      els.query.value = [...state.chips.map(chipToken).filter(Boolean), els.query.value.trim()].join(' ');
-      state.chips = [];
-      renderChips();
-      syncQuery();
-      newSearch();
-      return true;
-    }
-
-    const { rest, chips } = pullChips(els.query.value);
-    if (chips.length === 0) return false;
-    els.query.value = rest;
-    state.chips.push(...chips);
-    renderChips();
-    syncQuery();
-    newSearch();
-    focusChip(chips[0]);
-    return true;
-  }
-
-  /** Regex mode reads the whole box as one pattern, so the forms go back to text there and return after. */
-  function reflowChips() {
-    if (state.options.regex) {
-      if (state.chips.length) {
-        els.query.value = [...state.chips.map(chipToken).filter(Boolean), els.query.value.trim()].filter(Boolean).join(' ');
-        state.chips = [];
-      }
-    } else {
-      const { rest, chips } = pullChips(els.query.value);
-      state.chips = chips;
-      els.query.value = rest;
-    }
-    renderChips();
-    syncQuery();
-  }
-
-  // ---- suggestions for the type form --------------------------------------------------
-
-  const suggest = { items: [], index: -1, input: null, range: [0, 0] };
-
-  function matchTypes(word) {
-    const norm = normName(word.replace(/^\./, ''));
-    const scored = [];
-    for (const t of state.types) {
-      const name = t.name, label = normName(t.label);
-      let rank = null;
-      if (!norm) rank = t.kind ? 1 : 5;
-      else if (name === norm || label === norm) rank = 0;
-      else if (name.startsWith(norm) || label.startsWith(norm)) rank = 1;
-      else if (t.exts.includes(norm)) rank = 2;
-      else if (t.exts.some(x => x.startsWith(norm))) rank = 3;
-      else if (name.includes(norm) || label.includes(norm)) rank = 4;
-      if (rank !== null) scored.push({ t, rank });
-    }
-    scored.sort((a, b) => a.rank - b.rank);
-    const items = scored.slice(0, norm ? 8 : 12).map(s => ({ type: s.t, rank: s.rank }));
-    // Any bare suffix is fine too (fbx, .fbx ...): offered after names that match what was typed.
-    if (norm && /^[\w+#~$@-]+$/.test(norm) && !scored.some(s => s.rank === 0)) {
-      const at = items.findIndex(i => i.rank >= 2);
-      items.splice(at < 0 ? items.length : at, 0, { suffix: norm });
-    }
-    return items;
-  }
-
-  function showSuggestions(input) {
-    const caret = input.selectionStart ?? input.value.length;
-    const before = input.value.slice(0, caret);
-    const start = Math.max(before.lastIndexOf(','), before.lastIndexOf(';'), before.lastIndexOf('|'), before.lastIndexOf(' ')) + 1;
-    suggest.items = matchTypes(before.slice(start));
-    suggest.index = -1;
-    suggest.input = input;
-    suggest.range = [start, caret];
-    if (suggest.items.length === 0) return hideSuggestions();
-
-    els.suggest.innerHTML = suggest.items.map((item, i) => {
-      if (item.suffix)
-        return `<button class="menu-item" data-s="${i}"><span class="label"><b>.${esc(item.suffix)}</b> files</span><span class="sub">suffix</span></button>`;
-      const exts = item.type.exts.slice(0, 4).map(x => '.' + x).join(' ') + (item.type.exts.length > 4 ? ' …' : '');
-      return `<button class="menu-item" data-s="${i}"><span class="label"><b>${esc(item.type.label)}</b></span><span class="sub">${esc(exts)}</span></button>`;
-    }).join('');
-    els.suggest.hidden = false;
-
-    const frame = els.window.getBoundingClientRect();
-    const box = input.getBoundingClientRect();
-    els.suggest.style.left = `${Math.max(8, Math.min(box.left - frame.left, frame.width - els.suggest.offsetWidth - 8))}px`;
-    els.suggest.style.top = `${box.bottom - frame.top + 4}px`;
-  }
-
-  function hideSuggestions() {
-    if (els.suggest.hidden) return;
-    els.suggest.hidden = true;
-    suggest.items = [];
-    suggest.index = -1;
-  }
-
-  function markSuggestion() {
-    $$('.menu-item', els.suggest).forEach((el, i) => el.classList.toggle('sel', i === suggest.index));
-    $(`.menu-item[data-s="${suggest.index}"]`, els.suggest)?.scrollIntoView({ block: 'nearest' });
-  }
-
-  function pickSuggestion(index) {
-    const item = suggest.items[index], input = suggest.input;
-    if (!item || !input) return;
-    const root = input.closest('.qchip');
-    const [start, end] = suggest.range;
-    const insert = (item.suffix ? '.' + item.suffix : item.type.name) + ', ';
-    const head = input.value.slice(0, start) + insert;
-    input.value = head + input.value.slice(end).replace(/^[\s,;|]+/, '');
-    input.setSelectionRange(head.length, head.length);
-    chipById(root.dataset.id).text = input.value;
-    hideSuggestions();
-    chipChanged(root);
-  }
-
-  /** Keys while a form field has focus; returns after handling so the results list is left alone. */
-  function chipKey(e) {
-    const target = document.activeElement;
-    const open = target.dataset.f === 'text' && !els.suggest.hidden && suggest.items.length > 0;
-    if (target.classList.contains('qsel') && (e.key === 'Enter' || e.key === ' ')) return; // the button opens its menu
-
-    if (open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-      e.preventDefault();
-      const n = suggest.items.length;
-      suggest.index = e.key === 'ArrowDown' ? (suggest.index + 1) % n : suggest.index <= 0 ? n - 1 : suggest.index - 1;
-      markSuggestion();
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      if (open && suggest.index >= 0) pickSuggestion(suggest.index);
-      else { hideSuggestions(); els.query.focus(); }
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      if (open) hideSuggestions();
-      else els.query.focus();
-    } else if (e.key === 'Tab' && open && suggest.index >= 0) {
-      e.preventDefault();
-      pickSuggestion(suggest.index);
-    }
-  }
-
-  els.chips.addEventListener('input', e => {
-    const field = e.target.dataset.f, root = e.target.closest('.qchip');
-    if (!field || !root) return;
-    const chip = chipById(root.dataset.id);
-    chip[field] = e.target.value;
-    if (chip.kind === 'place') chip.auto = false; // edited by hand: it stays when Explorer is left
-    chipChanged(root);
-    if (field === 'text') showSuggestions(e.target);
-  });
-
-  function openChipMenu(button) {
-    const chip = chipById(button.closest('.qchip').dataset.id), field = button.dataset.f;
-    if (field === 'places') return openPlacesMenu(chip, button);
-
-    let options;
-    if (field === 'op') options = chip.kind === 'date' ? DATE_OPS : SIZE_OPS;
-    else if (field === 'unit') options = DATE_UNITS;
-    else options = SIZE_UNITS.map(u => ({ id: u, label: u }));
-
-    menu.open(button, options.map(o => ({
-      label: o.label,
-      checked: o.id === chip[field],
-      run: () => {
-        chip[field] = o.id;
-        renderChips();
-        chipChanged($(`.qchip[data-id="${chip.id}"]`, els.chips));
-        focusChip(chip); // on to the first field of the form: the number, date or text
-        if (field === 'unit') $(`.qchip[data-id="${chip.id}"] [data-f="n"]`, els.chips)?.focus();
-        if (field === 'hiUnit') $(`.qchip[data-id="${chip.id}"] [data-f="hi"]`, els.chips)?.focus();
-      },
-    })), { minWidth: field === 'op' ? 140 : 84 });
-  }
-
-  /** Places, indexed locations and a folder picker for the Folder form. */
-  function openPlacesMenu(chip, button) {
-    const choose = path => () => {
-      chip.path = path;
-      renderChips();
-      chipChanged($(`.qchip[data-id="${chip.id}"]`, els.chips));
-      focusChip(chip);
-    };
-    const same = path => chip.path.trim().toLowerCase().replace(/\\$/, '') === path.toLowerCase().replace(/\\$/, '');
-    const items = [];
-    if (state.places.length) items.push({ head: 'Places' });
-    for (const place of state.places) items.push({ label: place.label, checked: same(place.path), run: choose(place.path) });
-    items.push({ head: 'Indexed locations' });
-    for (const root of state.settings.roots) items.push({ label: root, checked: same(root), run: choose(root) });
-    items.push({ sep: true }, { label: 'Choose folder…', run: () => host.post({ type: 'pickFolder', purpose: `chip:${chip.id}` }) });
-    menu.open(button, items, { align: 'right' });
-  }
-
-  els.chips.addEventListener('click', e => {
-    const remove = e.target.closest('[data-f="remove"]');
-    if (remove) return removeChip(remove.closest('.qchip').dataset.id);
-    const choose = e.target.closest('.qsel');
-    if (choose) openChipMenu(choose);
-  });
-
-  els.chips.addEventListener('focusin', e => {
-    if (e.target.dataset.f === 'text') showSuggestions(e.target);
-    else hideSuggestions();
-  });
-  els.chips.addEventListener('focusout', e => {
-    if (e.target.dataset.f === 'text') hideSuggestions();
-  });
-
-  els.suggest.addEventListener('click', e => {
-    const item = e.target.closest('.menu-item');
-    if (item) pickSuggestion(+item.dataset.s);
-  });
-  els.suggest.addEventListener('mousemove', e => {
-    const item = e.target.closest('.menu-item');
-    if (item && +item.dataset.s !== suggest.index) { suggest.index = +item.dataset.s; markSuggestion(); }
-  });
 
   // ---- searching -------------------------------------------------------------------
 
-  const hasFilters = () => state.chips.some(chip => chipToken(chip));
+  const hasFilters = () => /\b(?:type|ext|kind|size|date|dm|modified|changed|updated|in|source|location):\S+/i.test(state.query);
   const isSearching = () => state.query.trim().length > 0;
 
   function runSearch({ keepSelection = false } = {}) {
@@ -830,7 +555,7 @@
     host.post({
       type: 'search',
       id: ++state.searchId,
-      query: state.query.trim(), // the filter forms are already part of it, as size:, type:, date: and in:
+      query: state.query.trim(),
       sort: sort.id,
       desc: !!sort.desc,
       limit: state.limit,
@@ -906,15 +631,13 @@
   const breadcrumbText = dir => breadcrumb(dir).replace(/<i>›<\/i>/g, ' › ').replace(/&amp;/g, '&');
 
   function applyPreset(preset) {
-    state.chips = [];
-    if (preset.kind) state.chips.push(newTypeChip(preset.kind));
-    if (preset.size) state.chips.push(newSizeChip(SIZE_PRESETS.find(p => p.id === preset.size).fields));
-    if (preset.modified) state.chips.push(newDateChip(DATE_PRESETS.find(p => p.id === preset.modified).fields()));
-    if (preset.scope) state.chips.push(newPlaceChip(preset.scope.path));
+    const tokens = [];
+    if (preset.kind) tokens.push(chipToken(newTypeChip(preset.kind)));
+    if (preset.size) tokens.push(chipToken(newSizeChip(SIZE_PRESETS.find(p => p.id === preset.size).fields)));
+    if (preset.modified) tokens.push(chipToken(newDateChip(DATE_PRESETS.find(p => p.id === preset.modified).fields())));
+    if (preset.scope) tokens.push(chipToken(newPlaceChip(preset.scope.path)));
     state.sort = preset.sort || state.settings.defaultSort;
-    renderChips();
-    syncQuery();
-    newSearch();
+    setQuery(tokens.filter(Boolean).join(' '));
   }
 
   function showHome() {
@@ -1108,182 +831,76 @@
   // ---- filters ---------------------------------------------------------------------
 
   const folderName = path => path.replace(/\\+$/, '').split('\\').pop() || path;
-  const firstChip = kind => state.chips.find(c => c.kind === kind) || null;
-  const unitLabel = (list, id, n) => {
-    const label = list.find(u => u.id === id)?.label ?? id;
-    return +n === 1 ? label.replace(/s$/, '') : label;
-  };
-  const dayText = iso => new Date(`${iso}T00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-
-  /** What a filter form says, for the buttons in the filter bar; null while it is still empty. */
-  function chipSummary(chip) {
-    if (!chipToken(chip)) return null;
-    if (chip.kind === 'type') {
-      const words = typeWords(chip.text);
-      return words.map(w => KINDS.find(k => k.id === normName(w))?.label ?? w).join(', ');
-    }
-    if (chip.kind === 'place') return folderName(chip.path.trim().replace(/^"|"$/g, ''));
-    if (chip.kind === 'size') {
-      const lo = `${amount(chip.lo)} ${chip.loUnit}`, hi = `${amount(chip.hi)} ${chip.hiUnit}`;
-      switch (chip.op) {
-        case 'between': return amount(chip.lo) && amount(chip.hi) ? `${lo} – ${hi}` : amount(chip.lo) ? `≥ ${lo}` : `≤ ${hi}`;
-        case 'max': return `≤ ${lo}`;
-        case 'eq': return +amount(chip.lo) === 0 ? 'Empty' : `= ${lo}`;
-        default: return `≥ ${lo}`;
-      }
-    }
-    switch (chip.op) {
-      case 'last': return `Last ${chip.n.trim()} ${unitLabel(DATE_UNITS, chip.unit, chip.n)}`;
-      case 'on': return dayText(chip.d1);
-      case 'before': return `Before ${dayText(chip.d1)}`;
-      case 'after': return `After ${dayText(chip.d1)}`;
-      case 'between':
-        return chip.d1 && chip.d2 ? `${dayText(chip.d1)} – ${dayText(chip.d2)}` : chip.d1 ? `From ${dayText(chip.d1)}` : `Until ${dayText(chip.d2)}`;
-      default: return DATE_OPS.find(o => o.id === chip.op).label.replace(/^./, c => c.toUpperCase());
-    }
-  }
-
   function renderFilters() {
-    const button = (id, kind, fallback) => {
-      const text = firstChip(kind) && chipSummary(firstChip(kind));
-      const el = $(id);
-      el.classList.toggle('on', !!text);
-      el.innerHTML = `<span>${esc(text || fallback)}</span>${icon('chevron', 13)}`;
-    };
-    button('#chip-kind', 'type', 'All types');
-    button('#chip-size', 'size', 'Size');
-    button('#chip-modified', 'date', 'Modified');
-    button('#chip-scope', 'place', 'Everywhere');
-
     const o = state.options;
     $('#btn-options').classList.toggle('active', o.matchCase || o.matchPath || o.regex || state.sort !== 'relevance');
   }
 
-  /**
-   * Puts a filter into the search bar exactly as typing "size:" (or type:, date:, in:) would:
-   * the same form, reused when one is already there.
-   */
-  function setFilter(kind, fields, { focus = false } = {}) {
+  /** Adds a filter token at the editor caret; repeated filters are independent AND-ed terms. */
+  function setFilter(kind, fields) {
     const blank = kind === 'size' ? newSizeChip(fields)
       : kind === 'date' ? newDateChip(fields)
       : kind === 'place' ? newPlaceChip(fields.path, !!fields.auto)
       : newTypeChip(fields.text);
-    let chip = firstChip(kind);
-    if (chip) {
-      const id = chip.id;
-      for (const key of Object.keys(chip)) delete chip[key];
-      Object.assign(chip, blank, { id });
-    } else {
-      chip = blank;
-      state.chips.push(chip);
-    }
-    renderChips();
-    syncQuery();
-    newSearch();
-    if (focus) focusChip(chip);
-    return chip;
-  }
-
-  function clearFilter(kind) {
-    state.chips = state.chips.filter(c => c.kind !== kind);
-    renderChips();
-    syncQuery();
-    newSearch();
+    const token = chipToken(blank);
+    if (token) insertFilterToken(token);
+    return token;
   }
 
   function resetFilters() {
-    state.chips = [];
-    renderChips();
-    syncQuery();
-    newSearch();
+    els.query.value = els.query.value.replace(FILTER_PATTERN, '$1')
+      .replace(/(^|\s)(?:AND|OR|NOT)(?=\s|$)/gi, '$1').replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+    state.explorerToken = '';
+    syncQuery(); renderQueryHighlight(); newSearch();
   }
-
-  /** Same-valued fields, so a preset can show as ticked. */
-  const matches = (chip, fields) => !!chip && Object.keys(fields).every(k => chip[k] === fields[k]);
 
   function setQuery(text) {
     els.query.value = text;
-    state.chips = [];
-    if (!state.options.regex) {
-      const { rest, chips } = pullChips(text);
-      state.chips = chips;
-      els.query.value = rest;
-    }
-    renderChips();
+    state.explorerToken = '';
     renderQueryHighlight();
     syncQuery();
     els.query.focus();
     newSearch();
   }
 
-  function openKindMenu() {
-    const current = firstChip('type');
-    const words = current && chipToken(current) ? typeWords(current.text).map(normName) : [];
-    const items = KINDS.map(k => ({
-      label: k.label,
-      checked: k.id === 'all' ? words.length === 0 : words.length === 1 && words[0] === k.id,
-      run: () => (k.id === 'all' ? clearFilter('type') : setFilter('type', { text: k.id })),
-    }));
-    items.push({ sep: true }, {
-      label: 'Custom…',
-      sub: 'names or suffixes',
-      checked: words.length > 0 && !(words.length === 1 && KINDS.some(k => k.id === words[0])),
-      run: () => (current ? focusChip(current) : setFilter('type', { text: '' }, { focus: true })),
-    });
-    menu.open($('#chip-kind'), items);
+  function openAddFilters() {
+    menu.open($('#btn-add-filter'), [
+      { label: 'File type', sub: '›', run: () => openFilterSubmenu('type') },
+      { label: 'Size', sub: '›', run: () => openFilterSubmenu('size') },
+      { label: 'Date modified', sub: '›', run: () => openFilterSubmenu('date') },
+      { label: 'Folder', sub: '›', run: () => openFilterSubmenu('place') },
+    ]);
   }
 
-  function openSizeMenu() {
-    const current = firstChip('size');
-    const items = [{ label: 'Any size', checked: !current || !chipToken(current), run: () => clearFilter('size') }];
-    for (const preset of SIZE_PRESETS)
-      items.push({ label: preset.label, checked: matches(current, preset.fields), run: () => setFilter('size', preset.fields) });
-    items.push({ sep: true }, {
-      label: 'Custom…',
-      sub: 'size form',
-      run: () => (current ? focusChip(current) : setFilter('size', {}, { focus: true })),
-    });
-    menu.open($('#chip-size'), items);
-  }
-
-  function openModifiedMenu() {
-    const current = firstChip('date');
-    const items = [{ label: 'Any time', checked: !current || !chipToken(current), run: () => clearFilter('date') }];
-    for (const preset of DATE_PRESETS) {
-      const fields = preset.fields();
-      items.push({ label: preset.label, checked: matches(current, fields), run: () => setFilter('date', fields) });
+  function openFilterSubmenu(kind) {
+    let items;
+    if (kind === 'type') {
+      items = KINDS.filter(k => k.id !== 'all').map(k => ({ label: k.label, run: () => insertFilterToken(`type:${k.id}`) }));
+      items.push({ sep: true }, { label: 'Custom file type…', sub: 'name or suffix', run: () => insertFilterToken('type:') });
+    } else if (kind === 'size') {
+      items = SIZE_PRESETS.map(p => ({ label: p.label, run: () => setFilter('size', p.fields) }));
+      items.push({ sep: true }, { label: 'Custom size…', sub: 'e.g. >500mb', run: () => insertFilterToken('size:') });
+    } else if (kind === 'date') {
+      items = DATE_PRESETS.map(p => ({ label: p.label, run: () => setFilter('date', p.fields()) }));
+      items.push({ sep: true }, { label: 'Custom date…', sub: 'e.g. >2026-01-01', run: () => insertFilterToken('date:') });
+    } else {
+      items = [];
+      if (state.places.length) items.push({ head: 'Places' });
+      for (const place of state.places) items.push({ label: place.label, run: () => setFilter('place', { path: place.path }) });
+      if (state.settings.roots.length) items.push({ head: 'Indexed locations' });
+      for (const root of state.settings.roots) items.push({ label: root, run: () => setFilter('place', { path: root }) });
+      items.push({ sep: true },
+        { label: 'Choose folder…', run: () => host.post({ type: 'pickFolder', purpose: 'addFilterPlace' }) },
+        { label: 'Type a path…', sub: 'C:\\Projects', run: () => insertFilterToken('in:') });
     }
-    items.push({ sep: true }, {
-      label: 'Custom…',
-      sub: 'date form',
-      run: () => (current ? focusChip(current) : setFilter('date', {}, { focus: true })),
-    });
-    menu.open($('#chip-modified'), items);
-  }
-
-  function openScopeMenu() {
-    const current = firstChip('place');
-    const path = current ? current.path.trim().toLowerCase().replace(/\\$/, '') : '';
-    const same = other => path && path === other.toLowerCase().replace(/\\$/, '');
-    const choose = target => () => setFilter('place', { path: target });
-
-    const items = [{ label: 'Everywhere', checked: !path, run: () => clearFilter('place') }];
-    if (state.places.length) items.push({ head: 'Places' });
-    for (const place of state.places) items.push({ label: place.label, checked: same(place.path), run: choose(place.path) });
-    items.push({ head: 'Indexed locations' });
-    for (const root of state.settings.roots) items.push({ label: root, checked: same(root), run: choose(root) });
-    if (path && !items.some(i => i.checked))
-      items.push({ sep: true }, { label: folderName(current.path.trim()), sub: 'Current', checked: true, run: () => focusChip(current) });
-    items.push({ sep: true },
-      { label: 'Choose folder…', run: () => host.post({ type: 'pickFolder', purpose: 'scope' }) },
-      { label: 'Type a path…', run: () => (current ? focusChip(current) : setFilter('place', { path: '' }, { focus: true })) });
-    menu.open($('#chip-scope'), items, { align: 'right' });
+    const title = ({ type: 'File type', size: 'Size', date: 'Date modified', place: 'Folder' })[kind];
+    items.unshift({ label: '‹ All filters', run: openAddFilters }, { head: title });
+    menu.open($('#btn-add-filter'), items, { minWidth: 190 });
   }
 
   function openOptionsMenu() {
     const toggle = key => () => {
       state.options[key] = !state.options[key];
-      if (key === 'regex') reflowChips();
       renderFilters();
       newSearch();
     };
@@ -1311,12 +928,7 @@
     if (action === 'open' || action === 'reveal') rememberSearch();
     if (action === 'searchHere') {
       const path = item.isDir ? pathOf(item) : item.dir;
-      state.chips = state.chips.filter(c => c.kind !== 'place');
-      state.chips.push(newPlaceChip(path));
-      els.query.value = '';
-      renderChips();
-      syncQuery();
-      newSearch();
+      setQuery(chipToken(newPlaceChip(path)));
       return;
     }
     host.post({ type: 'action', action, path: pathOf(item) });
@@ -1656,17 +1268,13 @@
 
   els.query.addEventListener('input', () => {
     renderQueryHighlight();
-    if (convertTypedFilters()) return;
     syncQuery();
     newSearch();
   });
   els.query.addEventListener('scroll', renderQueryHighlight);
   renderQueryHighlight();
 
-  $('#chip-kind').addEventListener('click', openKindMenu);
-  $('#chip-size').addEventListener('click', openSizeMenu);
-  $('#chip-modified').addEventListener('click', openModifiedMenu);
-  $('#chip-scope').addEventListener('click', openScopeMenu);
+  $('#btn-add-filter').addEventListener('click', openAddFilters);
   $('#btn-options').addEventListener('click', openOptionsMenu);
   $('#btn-settings').addEventListener('click', () => openSettings());
 
@@ -1734,9 +1342,6 @@
       return;
     }
 
-    // Inside a size/type form, keys belong to the form.
-    if (document.activeElement?.closest('.qchip')) return chipKey(e);
-
     // Typing always goes to the search box, even after clicking around in the preview.
     if (document.activeElement !== els.query && !ctrl && !e.altKey && e.key.length === 1) els.query.focus();
 
@@ -1749,26 +1354,15 @@
       case 'End': if (!ctrl) return; select(state.items.length - 1); break;
       case 'Enter': if (ctrl) act('reveal'); else activate(); break;
       case 'Backspace': {
-        // On an empty box, backspace takes the last size/type form away.
-        if (document.activeElement !== els.query || els.query.value !== '' || state.chips.length === 0) return;
-        removeChip(state.chips[state.chips.length - 1].id);
-        break;
+        return;
       }
       case 'Tab': {
-        // Steps through the preset types, filling the Type form as the drop-down does.
-        const step = e.shiftKey ? -1 : 1;
-        const current = firstChip('type');
-        const words = current && chipToken(current) ? typeWords(current.text).map(normName) : [];
-        const at = words.length === 0 ? 0 : words.length === 1 ? KINDS.findIndex(k => k.id === words[0]) : -1;
-        const next = KINDS[(at + step + KINDS.length) % KINDS.length];
-        if (next.id === 'all') clearFilter('type');
-        else setFilter('type', { text: next.id });
+        openAddFilters();
         break;
       }
       case 'Escape':
-        // Typed text first, then the filter forms, then the window.
-        if (els.query.value) { els.query.value = ''; syncQuery(); newSearch(); }
-        else if (state.chips.length) resetFilters();
+        // Clear the query first, then hide the window.
+        if (els.query.value) { els.query.value = ''; state.explorerToken = ''; syncQuery(); renderQueryHighlight(); newSearch(); }
         else host.post({ type: 'hide' });
         break;
       case 'k': if (!ctrl) return; openActionsMenu(); break;
@@ -1787,15 +1381,7 @@
   // ---- host messages ---------------------------------------------------------------
 
   function onFolderPicked({ purpose, path }) {
-    if (purpose.startsWith('chip:')) {
-      const chip = chipById(purpose.slice(5));
-      if (!chip) return;
-      chip.path = path;
-      renderChips();
-      chipChanged($(`.qchip[data-id="${chip.id}"]`, els.chips));
-      return focusChip(chip);
-    }
-    if (purpose === 'scope') return void setFilter('place', { path });
+    if (purpose === 'addFilterPlace') return void setFilter('place', { path });
     if (purpose === 'exclude') return addExclusion(path);
     if (purpose === 'root' && !state.settings.roots.some(r => r.toLowerCase() === path.toLowerCase())) {
       state.settings.roots.push(path);
@@ -1809,13 +1395,19 @@
    * way is replaced the next time it is opened from somewhere else, but one picked by hand stays.
    */
   function onExplorerFolder(path) {
-    const current = firstChip('place');
     if (path) {
-      if (current && !current.auto && current.path.trim().toLowerCase() === path.toLowerCase()) return;
-      setFilter('place', { path, auto: true });
+      const token = chipToken(newPlaceChip(path, true));
+      if (state.explorerToken && els.query.value.includes(state.explorerToken))
+        els.query.value = els.query.value.replace(state.explorerToken, token);
+      else
+        els.query.value = `${token} ${els.query.value}`.trim();
+      state.explorerToken = token;
+      syncQuery(); renderQueryHighlight(); newSearch();
       if (state.view === 'main') toast(`Searching in ${folderName(path)}`);
-    } else if (current?.auto) {
-      clearFilter('place');
+    } else if (state.explorerToken) {
+      els.query.value = els.query.value.replace(state.explorerToken, '').replace(/\s{2,}/g, ' ').trim();
+      state.explorerToken = '';
+      syncQuery(); renderQueryHighlight(); newSearch();
     }
   }
 
