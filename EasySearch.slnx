@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EasySearch.Cli/EasySearch.Cli.csproj" />
+    <Project Path="src/EasySearch.Core/EasySearch.Core.csproj" />
+    <Project Path="src/EasySearch/EasySearch.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EasySearch.Tests/EasySearch.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,403 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.IO.Enumeration;
+using System.Text.RegularExpressions;
+
+namespace EasySearch.Core;
+
+public sealed class SearchHit
+{
+    public required string Name { get; init; }
+    /// <summary>Containing folder; empty for an index location itself.</summary>
+    public required string Dir { get; init; }
+    public bool IsDir { get; init; }
+    public long Size { get; init; }
+    /// <summary>Unix milliseconds.</summary>
+    public long Modified { get; init; }
+    public bool Hidden { get; init; }
+
+    public string Path => Dir.Length == 0 ? Name : System.IO.Path.Combine(Dir, Name);
+}
+
+public sealed class SearchResult
+{
+    public int Total { get; init; }
+    public double ElapsedMs { get; init; }
+    public List<SearchHit> Items { get; init; } = [];
+    public string? Error { get; init; }
+}
+
+/// <summary>
+/// Runs a query as a parallel scan over the whole index, keeping only the best
+/// <see cref="SearchRequest.Limit"/> hits per thread so huge result sets stay cheap.
+/// </summary>
+public static class SearchEngine
+{
+    public const int MaxLimit = 10_000;
+
+    /// <summary>Threads used per search; -1 lets the runtime decide.</summary>
+    public static int MaxParallelism { get; set; } = -1;
+
+    enum SortKey { Relevance, Name, Path, Size, Modified }
+
+    readonly record struct Hit(int Index, int Score);
+
+    public static SearchResult Run(FileIndex index, SearchRequest request, CancellationToken cancel = default)
+    {
+        var timer = Stopwatch.StartNew();
+        CompiledQuery query;
+        try
+        {
+            query = QueryParser.Parse(request, DateTime.Now);
+        }
+        catch (FormatException e)
+        {
+            return new SearchResult { Error = e.Message };
+        }
+
+        var snapshot = index.Snapshot();
+        if (snapshot.Count == 0) return new SearchResult { ElapsedMs = timer.Elapsed.TotalMilliseconds };
+
+        bool[]? scope = query.Scope is null ? null : index.BuildScopeMask(query.Scope, snapshot);
+
+        var sort = request.Sort.ToLowerInvariant() switch
+        {
+            "name" => SortKey.Name,
+            "path" => SortKey.Path,
+            "size" => SortKey.Size,
+            "modified" or "date" => SortKey.Modified,
+            _ => SortKey.Relevance,
+        };
+        bool descending = request.Desc;
+        if (sort == SortKey.Relevance && query.Primary < 0)
+        {
+            // Nothing to rank by (filters only): newest first is the most useful order.
+            sort = SortKey.Modified;
+            descending = true;
+        }
+
+        int limit = Math.Clamp(request.Limit, 1, MaxLimit);
+        var ranking = new Ranking(snapshot, sort, descending);
+        var worstFirst = Comparer<Hit>.Create((a, b) => ranking.Compare(b, a));
+        var matcher = new Matcher(snapshot, query, scope, sort == SortKey.Relevance);
+
+        string? driver = FindDriver(query);
+
+        var best = new List<Hit>();
+        long total = 0;
+        int rangeSize = Math.Max(8192, snapshot.Count / (Environment.ProcessorCount * 4));
+
+        Parallel.ForEach(
+            Partitioner.Create(0, snapshot.Count, rangeSize),
+            new ParallelOptions { CancellationToken = cancel, MaxDegreeOfParallelism = MaxParallelism },
+            () => new Local(limit, ranking, worstFirst),
+            (range, loop, local) =>
+            {
+                if (cancel.IsCancellationRequested) { loop.Stop(); return local; }
+                if (driver is not null)
+                {
+                    ScanNames(snapshot, range.Item1, range.Item2, driver, query.Comparison, matcher, local);
+                    return local;
+                }
+                for (int i = range.Item1; i < range.Item2; i++)
+                {
+                    if ((i & 0x3FFF) == 0 && cancel.IsCancellationRequested) { loop.Stop(); break; }
+                    if (matcher.IsMatch(i, local, out int score)) local.Add(new Hit(i, score));
+                }
+                return local;
+            },
+            local =>
+            {
+                lock (best)
+                {
+                    total += local.Total;
+                    while (local.Heap.TryDequeue(out var hit, out _)) best.Add(hit);
+                }
+            });
+
+        cancel.ThrowIfCancellationRequested();
+        best.Sort(ranking);
+        if (best.Count > limit) best.RemoveRange(limit, best.Count - limit);
+
+        var items = new List<SearchHit>(best.Count);
+        foreach (var hit in best)
+        {
+            int i = hit.Index;
+            bool isRoot = snapshot.Parent[i] < 0;
+            items.Add(new SearchHit
+            {
+                Name = isRoot ? snapshot.GetPath(i) : snapshot.Name(i).ToString(),
+                Dir = snapshot.GetDirectory(i),
+                IsDir = snapshot.IsDirectory(i),
+                Size = snapshot.Size[i],
+                Modified = PathUtil.ToUnixMs(snapshot.Modified[i]),
+                Hidden = (snapshot.Flags[i] & (EntryFlags.Hidden | EntryFlags.HiddenTree)) != 0,
+            });
+        }
+
+        return new SearchResult
+        {
+            Total = (int)Math.Min(total, int.MaxValue),
+            ElapsedMs = timer.Elapsed.TotalMilliseconds,
+            Items = items,
+        };
+    }
+
+    /// <summary>
+    /// The longest piece of literal text every matching name must contain, if the query has one.
+    /// It lets <see cref="ScanNames"/> skip straight to candidate entries.
+    /// </summary>
+    static string? FindDriver(CompiledQuery query)
+    {
+        string? driver = null;
+        foreach (var term in query.Terms)
+        {
+            if (term.Negate || term.OnPath || term.Alternatives.Length != 1) continue;
+            var alternative = term.Alternatives[0];
+            if (alternative.Kind == MatchKind.Regex) continue;
+
+            foreach (var literal in alternative.Kind == MatchKind.Wildcard ? alternative.Text.Split('*', '?') : [alternative.Text])
+                if (literal.Length > (driver?.Length ?? 0)) driver = literal;
+        }
+        // A single character matches nearly everything; jumping between matches then costs more than it saves.
+        return driver is { Length: > 1 } ? driver : null;
+    }
+
+    /// <summary>
+    /// All names sit back to back in one buffer, so instead of testing entries one by one this
+    /// runs a single vectorized search for <paramref name="driver"/> across the buffer and only
+    /// evaluates the entries it lands in.
+    /// </summary>
+    static void ScanNames(IndexSnapshot snapshot, int from, int to, string driver, StringComparison comparison, Matcher matcher, Local local)
+    {
+        var names = snapshot.Names;
+        var starts = snapshot.NameStart;
+        int end = starts[to - 1] + snapshot.NameLength[to - 1];
+        int entry = from;
+
+        while (entry < to)
+        {
+            int position = starts[entry];
+            int found = names.AsSpan(position, end - position).IndexOf(driver, comparison);
+            if (found < 0) return;
+            found += position;
+
+            // Last entry whose name starts at or before the match.
+            int e = Array.BinarySearch(starts, entry, to - entry, found);
+            if (e < 0) e = ~e - 1;
+
+            // A match that runs past the end of the name straddles two entries: not a real match.
+            if (found + driver.Length <= starts[e] + snapshot.NameLength[e] && matcher.IsMatch(e, local, out int score))
+                local.Add(new Hit(e, score));
+            entry = e + 1;
+        }
+    }
+
+    /// <summary>Per-thread state: a bounded heap whose root is the worst hit kept so far.</summary>
+    sealed class Local(int limit, Ranking ranking, IComparer<Hit> worstFirst)
+    {
+        public readonly PriorityQueue<Hit, Hit> Heap = new(worstFirst);
+        public long Total;
+        char[] _path = new char[512];
+        Dictionary<Alternative, Regex>? _regexes;
+
+        /// <summary>
+        /// A Regex only caches one runner, so sharing an instance across threads makes every
+        /// other thread allocate a fresh one per call. Each thread gets its own copy instead.
+        /// </summary>
+        public Regex RegexFor(Alternative alternative)
+        {
+            _regexes ??= [];
+            if (!_regexes.TryGetValue(alternative, out var regex))
+            {
+                var shared = alternative.Regex!;
+                _regexes[alternative] = regex = new Regex(shared.ToString(), shared.Options, shared.MatchTimeout);
+            }
+            return regex;
+        }
+
+        public void Add(Hit hit)
+        {
+            Total++;
+            if (Heap.Count < limit) Heap.Enqueue(hit, hit);
+            else if (ranking.Compare(hit, Heap.Peek()) < 0) Heap.EnqueueDequeue(hit, hit);
+        }
+
+        public ReadOnlySpan<char> PathOf(IndexSnapshot snapshot, int i)
+        {
+            int length = snapshot.PathLength(i);
+            if (length > _path.Length) _path = new char[length * 2];
+            snapshot.WritePath(i, _path);
+            return _path.AsSpan(0, length);
+        }
+    }
+
+    sealed class Matcher(IndexSnapshot snapshot, CompiledQuery query, bool[]? scope, bool score)
+    {
+        readonly Term[] _terms = [.. query.Terms];
+        readonly HashSet<string>[] _required = [.. query.RequiredExtensions];
+        readonly StringComparison _comparison = query.Comparison;
+        readonly long _now = DateTime.UtcNow.Ticks;
+        readonly EntryFlags _skip = EntryFlags.Deleted
+            | (query.ShowHidden ? 0 : EntryFlags.Hidden | EntryFlags.HiddenTree)
+            | (query.ShowSystem ? 0 : EntryFlags.System);
+
+        public bool IsMatch(int i, Local local, out int relevance)
+        {
+            relevance = 0;
+            var flags = snapshot.Flags[i];
+            if ((flags & _skip) != 0) return false;
+
+            bool isDirectory = (flags & EntryFlags.Directory) != 0;
+            if (isDirectory ? query.FilesOnly : query.FoldersOnly) return false;
+            if (scope is not null && !scope[i]) return false;
+
+            if (query.HasSize)
+            {
+                long size = snapshot.Size[i];
+                if (isDirectory || size < query.SizeMin || size > query.SizeMax) return false;
+            }
+            if (query.HasDate)
+            {
+                long modified = snapshot.Modified[i];
+                if (modified < query.ModifiedMin || modified >= query.ModifiedMax) return false;
+            }
+
+            var name = snapshot.Name(i);
+            if (_required.Length > 0 || query.ForbiddenExtensions is not null)
+            {
+                if (isDirectory)
+                {
+                    if (_required.Length > 0) return false;
+                }
+                else
+                {
+                    var extension = FileKinds.ExtensionOf(name);
+                    foreach (var set in _required)
+                        if (!set.GetAlternateLookup<ReadOnlySpan<char>>().Contains(extension)) return false;
+                    if (query.ForbiddenExtensions?.GetAlternateLookup<ReadOnlySpan<char>>().Contains(extension) == true)
+                        return false;
+                }
+            }
+
+            ReadOnlySpan<char> path = default;
+            int primaryPosition = -1, primaryLength = 0;
+            for (int t = 0; t < _terms.Length; t++)
+            {
+                var term = _terms[t];
+                var text = name;
+                if (term.OnPath)
+                {
+                    if (path.IsEmpty) path = local.PathOf(snapshot, i);
+                    text = path;
+                }
+
+                bool matched = false;
+                foreach (var alternative in term.Alternatives)
+                {
+                    switch (alternative.Kind)
+                    {
+                        case MatchKind.Substring:
+                            int position = text.IndexOf(alternative.Text, _comparison);
+                            matched = position >= 0;
+                            if (matched && t == query.Primary) { primaryPosition = position; primaryLength = alternative.Text.Length; }
+                            break;
+                        case MatchKind.Wildcard:
+                            matched = FileSystemName.MatchesSimpleExpression(alternative.Text, text, query.IgnoreCase);
+                            break;
+                        default:
+                            if (alternative.TimedOut) break;
+                            try { matched = local.RegexFor(alternative).IsMatch(text); }
+                            catch (RegexMatchTimeoutException) { alternative.TimedOut = true; }
+                            break;
+                    }
+                    if (matched) break;
+                }
+                if (matched == term.Negate) return false;
+            }
+
+            if (score) relevance = Score(i, name, flags, primaryPosition, primaryLength);
+            return true;
+        }
+
+        /// <summary>Higher is better: exact and prefix matches first, then word starts, short names, shallow and recent items.</summary>
+        int Score(int i, ReadOnlySpan<char> name, EntryFlags flags, int position, int length)
+        {
+            int value = 0;
+            if (position == 0)
+            {
+                value += 400;
+                int stem = name.LastIndexOf('.');
+                if (length == name.Length || length == stem) value += 600;
+            }
+            else if (position > 0)
+            {
+                char before = name[position - 1], at = name[position];
+                if (!char.IsLetterOrDigit(before) || (char.IsLower(before) && char.IsUpper(at))) value += 200;
+            }
+
+            value -= Math.Min(name.Length, 120);
+            if ((flags & EntryFlags.Directory) != 0) value += 40;
+            if ((flags & (EntryFlags.Hidden | EntryFlags.HiddenTree | EntryFlags.System)) != 0) value -= 150;
+            if (name.Length > 0 && name[0] is '.' or '_' or '$' or '~') value -= 40;
+
+            int depth = 0;
+            for (int p = snapshot.Parent[i]; p >= 0; p = snapshot.Parent[p]) depth++;
+            value -= Math.Min(depth, 24) * 6;
+
+            long age = _now - snapshot.Modified[i];
+            value += age < TimeSpan.TicksPerDay ? 80
+                : age < 7 * TimeSpan.TicksPerDay ? 60
+                : age < 30 * TimeSpan.TicksPerDay ? 40
+                : age < 365 * TimeSpan.TicksPerDay ? 20 : 0;
+            return value;
+        }
+    }
+
+    /// <summary>Orders hits the way they are shown: <c>Compare(a, b) &lt; 0</c> means a comes first.</summary>
+    sealed class Ranking(IndexSnapshot snapshot, SortKey key, bool descending) : IComparer<Hit>
+    {
+        [ThreadStatic] static char[]? t_left;
+        [ThreadStatic] static char[]? t_right;
+
+        public int Compare(Hit a, Hit b)
+        {
+            int order = key switch
+            {
+                SortKey.Relevance => Relevance(a, b),
+                SortKey.Name => Direction(CompareNames(a.Index, b.Index)),
+                SortKey.Path => Direction(ComparePaths(a.Index, b.Index)),
+                SortKey.Size => Direction(snapshot.Size[a.Index].CompareTo(snapshot.Size[b.Index])),
+                _ => Direction(snapshot.Modified[a.Index].CompareTo(snapshot.Modified[b.Index])),
+            };
+            if (order == 0 && key != SortKey.Name) order = CompareNames(a.Index, b.Index);
+            return order != 0 ? order : a.Index.CompareTo(b.Index);
+        }
+
+        int Direction(int order) => descending ? -order : order;
+
+        int Relevance(Hit a, Hit b)
+        {
+            int order = b.Score.CompareTo(a.Score);
+            return order != 0 ? order : snapshot.NameLength[a.Index].CompareTo(snapshot.NameLength[b.Index]);
+        }
+
+        int CompareNames(int a, int b) =>
+            snapshot.Name(a).CompareTo(snapshot.Name(b), StringComparison.OrdinalIgnoreCase);
+
+        int ComparePaths(int a, int b)
+        {
+            var left = PathOf(a, ref t_left);
+            var right = PathOf(b, ref t_right);
+            return left.CompareTo(right, StringComparison.OrdinalIgnoreCase);
+        }
+
+        ReadOnlySpan<char> PathOf(int i, ref char[]? buffer)
+        {
+            int length = snapshot.PathLength(i);
+            if (buffer is null || buffer.Length < length) buffer = new char[Math.Max(1024, length * 2)];
+            snapshot.WritePath(i, buffer);
+            return buffer.AsSpan(0, length);
+        }
+    }
+}

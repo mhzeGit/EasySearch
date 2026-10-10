@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EasySearch</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="window" id="window">
+
+    <header class="searchbar">
+      <span class="searchbar-icon" data-icon="search" data-size="22"></span>
+      <input id="query" class="searchbar-input" type="text" placeholder="Search files and folders"
+             autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">
+      <span class="searchbar-count" id="count"></span>
+      <button class="icon-btn" id="btn-options" title="Sort and search options" data-icon="sliders" data-size="17"></button>
+      <button class="icon-btn" id="btn-settings" title="Settings (Ctrl+,)" data-icon="gear" data-size="17"></button>
+    </header>
+
+    <nav class="filters">
+      <div class="kinds" id="kinds" role="tablist"></div>
+      <div class="filter-menus">
+        <button class="chip" id="chip-size"></button>
+        <button class="chip" id="chip-modified"></button>
+        <button class="chip" id="chip-scope"></button>
+      </div>
+    </nav>
+
+    <main class="content" id="content">
+      <section class="list" id="list" role="listbox" aria-label="Results"></section>
+      <aside class="preview" id="preview"></aside>
+    </main>
+
+    <footer class="statusbar">
+      <div class="status" id="status"></div>
+      <div class="hints" id="hints"></div>
+    </footer>
+
+    <section class="settings" id="settings" hidden></section>
+    <div class="menu" id="menu" hidden></div>
+    <div class="toast" id="toast" role="status"></div>
+  </div>
+
+  <script src="mock.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

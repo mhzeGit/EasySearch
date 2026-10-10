@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>EasySearch</AssemblyName>
+    <RootNamespace>EasySearch</RootNamespace>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationVisualStyles>true</ApplicationVisualStyles>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The WebView2 package also ships a WPF control whose WindowsBase reference clashes harmlessly; this app only uses WinForms. -->
+    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EasySearch.Core\EasySearch.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The interface is plain HTML/CSS/JS, served to WebView2 from the output folder. -->
+    <Content Include="ui\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+  </ItemGroup>
+
+</Project>
