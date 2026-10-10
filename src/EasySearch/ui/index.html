@@ -17,9 +17,6 @@
           <input id="query" class="searchbar-input" type="text" placeholder="Search files and folders"
                  autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">
         </span>
-        <span class="searchbar-count" id="count"></span>
-        <button class="icon-btn" id="btn-options" title="Sort and search options" data-icon="sliders" data-size="17"></button>
-        <button class="icon-btn" id="btn-settings" title="Settings (Ctrl+,)" data-icon="gear" data-size="17"></button>
       </div>
       <div class="filterbar">
         <button class="add-filter-btn" id="btn-add-filter" aria-haspopup="menu"><span data-icon="plus" data-size="14"></span><span>Add filters</span><span data-icon="chevron" data-size="12"></span></button>
@@ -33,7 +30,12 @@
 
     <footer class="statusbar">
       <div class="status" id="status"></div>
-      <div class="hints" id="hints"></div>
+      <div class="status-tools">
+        <span class="searchbar-count" id="count"></span>
+        <div class="hints" id="hints"></div>
+        <button class="icon-btn" id="btn-options" title="Sort and search options" aria-label="Sort and search options" data-icon="sliders" data-size="17"></button>
+        <button class="icon-btn" id="btn-settings" title="Settings (Ctrl+,)" aria-label="Settings" data-icon="gear" data-size="17"></button>
+      </div>
     </footer>
 
     <section class="settings" id="settings" hidden></section>

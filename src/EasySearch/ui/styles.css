@@ -173,7 +173,6 @@ svg.i { flex: none; display: block; }
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  padding-right: 4px;
 }
 
 .icon-btn {
@@ -378,6 +377,7 @@ svg.i { flex: none; display: block; }
   font-size: 12px;
   background: color-mix(in srgb, var(--text) 2.5%, transparent);
 }
+.status-tools { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .status { display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .status .dot { width: 7px; height: 7px; border-radius: 50%; background: #34c759; flex: none; }
 .status.busy .dot { background: #ffd60a; animation: pulse 1.1s ease-in-out infinite; }
