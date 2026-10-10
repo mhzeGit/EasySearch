@@ -70,7 +70,7 @@ svg.i { flex: none; display: block; }
 .window {
   position: relative;
   display: grid;
-  grid-template-rows: auto 44px minmax(0, 1fr) 38px;
+  grid-template-rows: auto minmax(0, 1fr) 38px;
   width: 100vw;
   height: 100vh;
   background: var(--surface);
