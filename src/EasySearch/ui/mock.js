@@ -64,6 +64,40 @@ window.createMockHost = () => {
   };
   const ext = name => (name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : '');
 
+  // The same shape as FileKinds.Catalog in the real host: what type: can be followed by.
+  const TYPES = [
+    ['image', 'Images', 'jpg jpeg png gif bmp webp svg heic psd', true], ['video', 'Video', 'mp4 mkv mov avi webm', true],
+    ['audio', 'Audio', 'mp3 wav flac aac ogg m4a', true], ['document', 'Documents', 'pdf doc docx xls xlsx ppt pptx txt md csv', true],
+    ['code', 'Code', 'js ts py cs html css json xml yaml', true], ['archive', 'Archives', 'zip rar 7z tar gz iso', true],
+    ['app', 'Apps', 'exe msi lnk', true], ['3d', '3D models', 'fbx obj blend gltf glb stl 3ds dae usd', true],
+    ['cad', 'CAD drawings', 'dwg dxf step stp iges', true], ['spreadsheet', 'Spreadsheets', 'xls xlsx ods csv', true],
+    ['font', 'Fonts', 'ttf otf woff woff2', true], ['blender', 'Blender', 'blend blend1', false],
+    ['photoshop', 'Photoshop', 'psd psb', false], ['illustrator', 'Illustrator', 'ai', false],
+    ['word', 'Word', 'doc docx docm', false], ['excel', 'Excel', 'xls xlsx xlsm', false], ['pdf', 'PDF', 'pdf', false],
+    ['python', 'Python', 'py pyw ipynb', false], ['csharp', 'C#', 'cs csx csproj', false],
+  ].map(([name, label, exts, kind]) => ({ name, label, exts: exts.split(' '), kind }));
+  const normName = text => text.toLowerCase().replace(/[\s_-]/g, '');
+  const typeExts = value => {
+    const t = TYPES.find(t => t.name === normName(value) || normName(t.label) === normName(value));
+    return t ? t.exts : [value.replace(/^\*?\./, '').toLowerCase()];
+  };
+  const toBytes = text => {
+    const m = /^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb)?$/.exec(text.trim());
+    return m ? parseFloat(m[1]) * { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3, tb: 1024 ** 4 }[m[2] || 'b'] : NaN;
+  };
+  /** size: values as [min, max]; understands >=, <=, >, <, =, a..b and a-b. */
+  const sizeRange = value => {
+    let m;
+    if ((m = /^(>=|<=|>|<|=)(.+)$/.exec(value))) {
+      const n = toBytes(m[2]);
+      return m[1][0] === '>' ? [n, Infinity] : m[1][0] === '<' ? [0, n] : [n, n];
+    }
+    const parts = value.includes('..') ? value.split('..') : /^[^-]+-[^-]+$/.test(value) ? value.split('-') : null;
+    if (parts) return [parts[0] ? toBytes(parts[0]) : 0, parts[1] ? toBytes(parts[1]) : Infinity];
+    const n = toBytes(value);
+    return [n, Infinity];
+  };
+
   let settings = {
     theme: 'system', accent: '#0a84ff', hotkey: 'Alt+Space', hideOnBlur: true, launchAtLogin: false, showPreview: true,
     roots: ['C:\\', 'D:\\'], excluded: ['$Recycle.Bin', 'System Volume Information', 'node_modules', '.git', 'C:\\Windows\\WinSxS'],
@@ -80,14 +114,20 @@ window.createMockHost = () => {
   function search(request) {
     const started = performance.now();
     const terms = [];
-    let extFilter = null, error = null;
+    let extFilter = null, error = null, typeFilter = null, sizeFilter = null;
     // The mock only understands the symbols, so spell the capitalised logic words that way.
     const spelled = request.query.replace(/\s+(OR|or|\|\|)\s+/g, '|').replace(/\b(AND|and|&&)\s+/g, '')
       .replace(/\bNOT\s+/g, '!').replace(/[()]/g, '');
     for (const token of spelled.toLowerCase().match(/"[^"]*"|\S+/g) || []) {
       const text = token.replace(/"/g, '');
       if (text.startsWith('ext:')) extFilter = text.slice(4).split(/[;,|]/);
-      else if (text.startsWith('size:') && !/^size:[<>=]*[\d.]+(b|kb|mb|gb)?/.test(text)) error = `Can't read size "${text.slice(5)}". Try size:>10mb or size:1mb..1gb`;
+      else if (/^(type|kind):/.test(text)) {
+        typeFilter = [...(typeFilter || []), ...text.slice(text.indexOf(':') + 1).split(/[;,|]/).filter(Boolean).flatMap(typeExts)];
+      } else if (text.startsWith('size:')) {
+        const range = sizeRange(text.slice(5));
+        if (range.some(Number.isNaN)) error = `Can't read size "${text.slice(5)}". Try size:>10mb or size:1mb..1gb`;
+        else sizeFilter = range;
+      }
       else if (!/^\w+:/.test(text) || /^[a-z]:\\/.test(text)) terms.push(text);
     }
     if (error) return { error, items: [], total: 0, elapsedMs: 0 };
@@ -100,6 +140,8 @@ window.createMockHost = () => {
       if (request.kind === 'folder' && !file.isDir) return false;
       if (kindExts && (file.isDir || !kindExts.includes(ext(file.name)))) return false;
       if (extFilter && (file.isDir || !extFilter.includes(ext(file.name)))) return false;
+      if (typeFilter && (file.isDir || !typeFilter.includes(ext(file.name)))) return false;
+      if (sizeFilter && (file.isDir || file.size < sizeFilter[0] || file.size > sizeFilter[1])) return false;
       if (customExts.length && (file.isDir || !customExts.includes(ext(file.name)))) return false;
       if (request.sizeMin != null && (file.isDir || file.size < request.sizeMin)) return false;
       if (request.sizeMax != null && (file.isDir || file.size > request.sizeMax)) return false;
@@ -135,6 +177,7 @@ window.createMockHost = () => {
         case 'ready':
           send({
             type: 'init', settings, theme: theme(), backdrop: true, version: '0.1.0', hotkeyOk: true,
+            types: TYPES,
             places: ['Home', 'Desktop', 'Documents', 'Downloads', 'Pictures', 'Music', 'Videos']
               .map(label => ({ label, path: label === 'Home' ? HOME : `${HOME}\\${label}` })),
           });

@@ -9,13 +9,17 @@
 <body>
   <div class="window" id="window">
 
-    <header class="searchbar">
-      <span class="searchbar-icon" data-icon="search" data-size="22"></span>
-      <input id="query" class="searchbar-input" type="text" placeholder="Search files and folders"
-             autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">
-      <span class="searchbar-count" id="count"></span>
-      <button class="icon-btn" id="btn-options" title="Sort and search options" data-icon="sliders" data-size="17"></button>
-      <button class="icon-btn" id="btn-settings" title="Settings (Ctrl+,)" data-icon="gear" data-size="17"></button>
+    <header class="searchblock">
+      <div class="searchbar">
+        <span class="searchbar-icon" data-icon="search" data-size="22"></span>
+        <input id="query" class="searchbar-input" type="text" placeholder="Search files and folders"
+               autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">
+        <span class="searchbar-count" id="count"></span>
+        <button class="icon-btn" id="btn-options" title="Sort and search options" data-icon="sliders" data-size="17"></button>
+        <button class="icon-btn" id="btn-settings" title="Settings (Ctrl+,)" data-icon="gear" data-size="17"></button>
+      </div>
+      <!-- size: and type: typed above turn into these small forms -->
+      <div class="qchips" id="qchips" hidden></div>
     </header>
 
     <nav class="filters">
@@ -43,6 +47,7 @@
 
     <section class="settings" id="settings" hidden></section>
     <div class="menu" id="menu" hidden></div>
+    <div class="menu suggest" id="suggest" hidden></div>
     <div class="toast" id="toast" role="status"></div>
   </div>
 

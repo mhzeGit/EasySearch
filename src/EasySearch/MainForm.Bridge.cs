@@ -92,6 +92,7 @@ public sealed partial class MainForm
                     backdrop = true,
                     version = Application.ProductVersion.Split('+')[0],
                     places = Places(),
+                    types = FileKinds.Catalog.Select(t => new { name = t.Name, label = t.Label, exts = t.Extensions, kind = t.IsKind }),
                     hotkeyOk = _hotkeyRegistered,
                 });
                 PostStatus();

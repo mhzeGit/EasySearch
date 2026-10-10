@@ -113,6 +113,34 @@ public sealed class SearchTests : IDisposable
     }
 
     [Fact]
+    public void Type_accepts_suffixes_without_a_dot_and_tool_names()
+    {
+        // A bare word that is not a known name is a suffix: type:pdf == type:.pdf == ext:pdf.
+        Assert.Equal(["Annual Report 2025.pdf"], Names("type:pdf"));
+        Assert.Equal(["holiday.png"], Names("type:PNG"));
+        Assert.Equal(Names("type:png;.pdf"), Names("type:png,pdf"));
+        Assert.Equal(["Annual Report 2025.pdf", "holiday.png"], Names("type:.pdf|png"));
+
+        // Tool and kind names, spelled however people write them.
+        Assert.Equal(Names("type:image"), Names("type:photos"));
+        Assert.Equal(["annual report draft.docx"], Names("type:word"));
+        Assert.Equal(["Program.cs"], Names("type:csharp"));
+        Assert.Equal(["Program.cs"], Names("type:C#"));
+        Assert.Empty(Names("type:blender"));
+        Assert.Equal(["notes.txt"], Names("type:text !type:md,log"));
+
+        foreach (var name in new[] { "blender", "3D", "3d models", "3d-models", "Cinema 4D" })
+            Assert.NotNull(FileKinds.Extensions(name));
+        Assert.Contains("blend", FileKinds.Extensions("Blender")!);
+        Assert.Contains("fbx", FileKinds.Extensions("3D")!);
+        Assert.Contains("blend", FileKinds.Extensions("3D models")!);
+        Assert.Contains("fbx", FileKinds.Extensions("3d-models")!);
+        Assert.Null(FileKinds.Extensions("fbx")); // a plain suffix, handled by the parser
+
+        Assert.Contains(FileKinds.Catalog, t => t.Name == "blender" && t.Extensions.Contains("blend"));
+    }
+
+    [Fact]
     public void Or_between_any_filters_and_grouping()
     {
         static string[] Sorted(IEnumerable<string> names) => [.. names.Order(StringComparer.Ordinal)];
@@ -243,7 +271,7 @@ public sealed class SearchTests : IDisposable
     {
         Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "size:huge-ish" }).Error);
         Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "regex:([a-z" }).Error);
-        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = "type:spreadsheets" }).Error);
+        Assert.NotNull(SearchEngine.Run(_index, new SearchRequest { Query = @"type:a\b" }).Error);
     }
 
     [Fact]

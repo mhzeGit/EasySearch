@@ -240,7 +240,9 @@
     view: 'main',
     settingsTab: 'general',
     recording: false,
-    query: '',
+    query: '', // everything searched for: the size:/type: forms in chips, then the text box
+    chips: [],
+    types: [], // named types from the host: { name, label, exts, kind }
     kind: 'all', // a KINDS id, or 'custom' for the suffixes typed into state.ext
     ext: '',
     size: null,
@@ -262,6 +264,7 @@
 
   const els = {
     window: $('#window'), query: $('#query'), count: $('#count'), ext: $('#ext-input'), list: $('#list'),
+    chips: $('#qchips'), suggest: $('#suggest'),
     preview: $('#preview'), status: $('#status'), hints: $('#hints'), settings: $('#settings'),
     menu: $('#menu'), toast: $('#toast'),
   };
@@ -283,6 +286,373 @@
 
   const thumbUrl = item =>
     `https://images.easysearch.example/thumb?s=512&d=${item.isDir ? 1 : 0}&p=${encodeURIComponent(pathOf(item))}&m=${item.modified}`;
+
+  // ---- inline filters: size: and type: typed in the box turn into small forms -------------
+  //
+  // The text box only holds free text. Each size:/type: filter lives in state.chips, is drawn as a
+  // form under the box, and is written back into state.query as ordinary query syntax, so the
+  // search itself (and recent searches, tips, the CLI) keep speaking one language.
+
+  const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const SIZE_OPS = [
+    { id: 'min', label: 'at least' },
+    { id: 'max', label: 'at most' },
+    { id: 'between', label: 'between' },
+    { id: 'eq', label: 'exactly' },
+  ];
+  const UNIT_SHORT = { k: 'KB', m: 'MB', g: 'GB', t: 'TB' };
+  let chipSeq = 0;
+
+  const newSizeChip = (fields = {}) => ({ id: ++chipSeq, kind: 'size', op: 'min', lo: '', loUnit: 'MB', hi: '', hiUnit: 'MB', ...fields });
+  const newTypeChip = (text = '') => ({ id: ++chipSeq, kind: 'type', text });
+  const normName = text => text.toLowerCase().replace(/[\s_-]/g, '');
+
+  /** "10mb", "1.5 GB" or "500" -> { n: '10', unit: 'MB' }; null when it isn't an amount. */
+  function parseAmount(text, bareUnit = 'B') {
+    const m = /^(\d+(?:[.,]\d+)?)\s*([a-z]*)$/i.exec(text.trim());
+    if (!m) return null;
+    const word = m[2].toLowerCase();
+    const unit = word ? UNIT_SHORT[word] || word.toUpperCase() : bareUnit;
+    return SIZE_UNITS.includes(unit) ? { n: m[1].replace(',', '.'), unit } : null;
+  }
+
+  /** Form fields for a typed size value, or null when the form can't show it (size:tiny ...). */
+  function sizeFields(value) {
+    value = value.trim();
+    if (!value) return {};
+
+    const compare = /^(>=|<=|>|<|=)\s*(.+)$/.exec(value);
+    if (compare) {
+      const a = parseAmount(compare[2]);
+      if (!a) return null;
+      return { op: compare[1][0] === '>' ? 'min' : compare[1][0] === '<' ? 'max' : 'eq', lo: a.n, loUnit: a.unit };
+    }
+
+    let parts = null, borrowUnit = false;
+    const dots = value.indexOf('..');
+    if (dots >= 0) parts = [value.slice(0, dots), value.slice(dots + 2)];
+    else if (/^[^-]+-[^-]+$/.test(value)) { parts = value.split('-'); borrowUnit = true; } // 1-10mb: the unit covers both
+    if (parts) {
+      const right = parts[1].trim() ? parseAmount(parts[1]) : null;
+      const left = parts[0].trim() ? parseAmount(parts[0], borrowUnit && right ? right.unit : 'B') : null;
+      if ((parts[1].trim() && !right) || (parts[0].trim() && !left) || (!left && !right)) return null;
+      return { op: 'between', lo: left?.n ?? '', loUnit: left?.unit ?? right.unit, hi: right?.n ?? '', hiUnit: right?.unit ?? left.unit };
+    }
+
+    const a = parseAmount(value);
+    return a ? { op: 'min', lo: a.n, loUnit: a.unit } : null;
+  }
+
+  function chipFromToken(key, value) {
+    value = value.replace(/^"|"$/g, '');
+    if (key === 'size') {
+      const fields = sizeFields(value);
+      return fields ? newSizeChip(fields) : null;
+    }
+    return newTypeChip(value.split(/[;|,]+/).filter(Boolean).join(', '));
+  }
+
+  /** Logic (OR, NOT, parentheses) can't be expressed as AND-ed forms, so such queries stay text. */
+  const hasLogic = text => /(^|\s)(OR|or|NOT|\|\|?)(\s|$)|[()]/.test(text);
+
+  /** Lifts size: and type: tokens out of a piece of text into chips (ext: and kind: stay as typed). */
+  function pullChips(text) {
+    const chips = [];
+    if (hasLogic(text)) return { rest: text, chips };
+    const rest = text.replace(/(^|\s)(type|size):("[^"]*"|\S*)/gi, (all, lead, key, value) => {
+      const chip = chipFromToken(key.toLowerCase(), value);
+      if (!chip) return all;
+      chips.push(chip);
+      return lead;
+    });
+    return { rest: chips.length ? rest.replace(/\s{2,}/g, ' ').replace(/^\s+/, '') : text, chips };
+  }
+
+  const amount = text => {
+    const t = String(text).trim().replace(',', '.');
+    return /^\d+(\.\d+)?$/.test(t) ? t : '';
+  };
+
+  /** The words of a type form as the backend should see them: tool names are kept whole. */
+  function typeWords(text) {
+    const known = new Map();
+    for (const t of state.types) { known.set(normName(t.name), t.name); known.set(normName(t.label), t.name); }
+    const words = [];
+    for (const piece of text.split(/[;|,]+/)) {
+      const name = known.get(normName(piece));
+      if (name && /\s/.test(piece.trim())) words.push(name); // "Cinema 4D", "3D models"
+      else words.push(...piece.split(/\s+/).filter(Boolean));
+    }
+    return words;
+  }
+
+  function chipToken(chip) {
+    if (chip.kind === 'type') {
+      const words = typeWords(chip.text);
+      return words.length ? `type:${words.join(',')}` : null;
+    }
+    const lo = amount(chip.lo), hi = amount(chip.hi);
+    const side = (n, unit) => n + unit.toLowerCase();
+    switch (chip.op) {
+      case 'between':
+        if (lo && hi) return `size:${side(lo, chip.loUnit)}..${side(hi, chip.hiUnit)}`;
+        if (lo) return `size:>=${side(lo, chip.loUnit)}`;
+        if (hi) return `size:<=${side(hi, chip.hiUnit)}`;
+        return null;
+      case 'max': return lo ? `size:<=${side(lo, chip.loUnit)}` : null;
+      case 'eq': return lo ? `size:=${side(lo, chip.loUnit)}` : null;
+      default: return lo ? `size:>=${side(lo, chip.loUnit)}` : null;
+    }
+  }
+
+  function chipValid(chip) {
+    if (chip.kind !== 'size') return true;
+    const bad = text => text.trim() && !amount(text);
+    return !(bad(chip.lo) || (chip.op === 'between' && bad(chip.hi)));
+  }
+
+  /** state.query = the forms, then whatever is typed in the box. */
+  function syncQuery() {
+    state.query = [...state.chips.map(chipToken).filter(Boolean), els.query.value.trim()].filter(Boolean).join(' ');
+  }
+
+  const unitSelect = (field, value) =>
+    `<select data-f="${field}" aria-label="Unit">${SIZE_UNITS.map(u => `<option${u === value ? ' selected' : ''}>${u}</option>`).join('')}</select>`;
+
+  function chipHtml(chip) {
+    const remove = `<button class="qchip-x" data-f="remove" title="Remove" aria-label="Remove filter">${icon('x', 14)}</button>`;
+    const attrs = 'spellcheck="false" autocomplete="off" autocapitalize="off"';
+    if (chip.kind === 'type')
+      return `<div class="qchip" data-id="${chip.id}"><span class="qchip-label">Type</span>
+        <input class="wide" data-f="text" value="${esc(chip.text)}" placeholder="blender, image, 3D, pdf, .fbx" aria-label="File types" ${attrs}>${remove}</div>`;
+
+    const between = chip.op === 'between';
+    return `<div class="qchip${chipValid(chip) ? '' : ' invalid'}" data-id="${chip.id}"><span class="qchip-label">Size</span>
+      <select data-f="op" aria-label="Comparison">${SIZE_OPS.map(o =>
+        `<option value="${o.id}"${o.id === chip.op ? ' selected' : ''}>${o.label}</option>`).join('')}</select>
+      <input class="num" data-f="lo" value="${esc(chip.lo)}" placeholder="${between ? 'min' : 'size'}" inputmode="decimal" aria-label="${between ? 'Minimum size' : 'Size'}" ${attrs}>
+      ${unitSelect('loUnit', chip.loUnit)}
+      ${between ? `<span class="qchip-text">and</span>
+      <input class="num" data-f="hi" value="${esc(chip.hi)}" placeholder="max" inputmode="decimal" aria-label="Maximum size" ${attrs}>
+      ${unitSelect('hiUnit', chip.hiUnit)}` : ''}
+      ${remove}</div>`;
+  }
+
+  function renderChips() {
+    hideSuggestions();
+    els.chips.hidden = state.chips.length === 0;
+    els.chips.innerHTML = state.chips.map(chipHtml).join('');
+  }
+
+  function focusChip(chip) {
+    const root = $(`.qchip[data-id="${chip.id}"]`, els.chips);
+    const field = root && $('[data-f="lo"], [data-f="text"]', root);
+    if (!field) return;
+    field.focus();
+    field.select();
+  }
+
+  const chipById = id => state.chips.find(c => c.id === +id);
+
+  function chipChanged(root) {
+    const chip = chipById(root.dataset.id);
+    root.classList.toggle('invalid', !chipValid(chip));
+    syncQuery();
+    newSearch();
+  }
+
+  function removeChip(id) {
+    state.chips = state.chips.filter(c => c.id !== +id);
+    renderChips();
+    syncQuery();
+    els.query.focus();
+    newSearch();
+  }
+
+  /** Called from the text box: turns a freshly typed "size:" or "type:" into a form and moves into it. */
+  function convertTypedFilters() {
+    if (state.options.regex) return false;
+
+    // Forms are AND-ed, so the moment OR / NOT / parentheses are typed everything goes back to plain text.
+    if (state.chips.length && hasLogic(els.query.value)) {
+      els.query.value = [...state.chips.map(chipToken).filter(Boolean), els.query.value.trim()].join(' ');
+      state.chips = [];
+      renderChips();
+      syncQuery();
+      newSearch();
+      return true;
+    }
+
+    const { rest, chips } = pullChips(els.query.value);
+    if (chips.length === 0) return false;
+    els.query.value = rest;
+    state.chips.push(...chips);
+    renderChips();
+    syncQuery();
+    newSearch();
+    focusChip(chips[0]);
+    return true;
+  }
+
+  /** Regex mode reads the whole box as one pattern, so the forms go back to text there and return after. */
+  function reflowChips() {
+    if (state.options.regex) {
+      if (state.chips.length) {
+        els.query.value = [...state.chips.map(chipToken).filter(Boolean), els.query.value.trim()].filter(Boolean).join(' ');
+        state.chips = [];
+      }
+    } else {
+      const { rest, chips } = pullChips(els.query.value);
+      state.chips = chips;
+      els.query.value = rest;
+    }
+    renderChips();
+    syncQuery();
+  }
+
+  // ---- suggestions for the type form --------------------------------------------------
+
+  const suggest = { items: [], index: -1, input: null, range: [0, 0] };
+
+  function matchTypes(word) {
+    const norm = normName(word.replace(/^\./, ''));
+    const scored = [];
+    for (const t of state.types) {
+      const name = t.name, label = normName(t.label);
+      let rank = null;
+      if (!norm) rank = t.kind ? 1 : 5;
+      else if (name === norm || label === norm) rank = 0;
+      else if (name.startsWith(norm) || label.startsWith(norm)) rank = 1;
+      else if (t.exts.includes(norm)) rank = 2;
+      else if (t.exts.some(x => x.startsWith(norm))) rank = 3;
+      else if (name.includes(norm) || label.includes(norm)) rank = 4;
+      if (rank !== null) scored.push({ t, rank });
+    }
+    scored.sort((a, b) => a.rank - b.rank);
+    const items = scored.slice(0, norm ? 8 : 12).map(s => ({ type: s.t, rank: s.rank }));
+    // Any bare suffix is fine too (fbx, .fbx ...): offered after names that match what was typed.
+    if (norm && /^[\w+#~$@-]+$/.test(norm) && !scored.some(s => s.rank === 0)) {
+      const at = items.findIndex(i => i.rank >= 2);
+      items.splice(at < 0 ? items.length : at, 0, { suffix: norm });
+    }
+    return items;
+  }
+
+  function showSuggestions(input) {
+    const caret = input.selectionStart ?? input.value.length;
+    const before = input.value.slice(0, caret);
+    const start = Math.max(before.lastIndexOf(','), before.lastIndexOf(';'), before.lastIndexOf('|'), before.lastIndexOf(' ')) + 1;
+    suggest.items = matchTypes(before.slice(start));
+    suggest.index = -1;
+    suggest.input = input;
+    suggest.range = [start, caret];
+    if (suggest.items.length === 0) return hideSuggestions();
+
+    els.suggest.innerHTML = suggest.items.map((item, i) => {
+      if (item.suffix)
+        return `<button class="menu-item" data-s="${i}"><span class="label"><b>.${esc(item.suffix)}</b> files</span><span class="sub">suffix</span></button>`;
+      const exts = item.type.exts.slice(0, 4).map(x => '.' + x).join(' ') + (item.type.exts.length > 4 ? ' …' : '');
+      return `<button class="menu-item" data-s="${i}"><span class="label"><b>${esc(item.type.label)}</b></span><span class="sub">${esc(exts)}</span></button>`;
+    }).join('');
+    els.suggest.hidden = false;
+
+    const frame = els.window.getBoundingClientRect();
+    const box = input.getBoundingClientRect();
+    els.suggest.style.left = `${Math.max(8, Math.min(box.left - frame.left, frame.width - els.suggest.offsetWidth - 8))}px`;
+    els.suggest.style.top = `${box.bottom - frame.top + 4}px`;
+  }
+
+  function hideSuggestions() {
+    if (els.suggest.hidden) return;
+    els.suggest.hidden = true;
+    suggest.items = [];
+    suggest.index = -1;
+  }
+
+  function markSuggestion() {
+    $$('.menu-item', els.suggest).forEach((el, i) => el.classList.toggle('sel', i === suggest.index));
+    $(`.menu-item[data-s="${suggest.index}"]`, els.suggest)?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function pickSuggestion(index) {
+    const item = suggest.items[index], input = suggest.input;
+    if (!item || !input) return;
+    const root = input.closest('.qchip');
+    const [start, end] = suggest.range;
+    const insert = (item.suffix ? '.' + item.suffix : item.type.name) + ', ';
+    const head = input.value.slice(0, start) + insert;
+    input.value = head + input.value.slice(end).replace(/^[\s,;|]+/, '');
+    input.setSelectionRange(head.length, head.length);
+    chipById(root.dataset.id).text = input.value;
+    hideSuggestions();
+    chipChanged(root);
+  }
+
+  /** Keys while a form field has focus; returns after handling so the results list is left alone. */
+  function chipKey(e) {
+    const target = document.activeElement;
+    const open = target.dataset.f === 'text' && !els.suggest.hidden && suggest.items.length > 0;
+
+    if (open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault();
+      const n = suggest.items.length;
+      suggest.index = e.key === 'ArrowDown' ? (suggest.index + 1) % n : suggest.index <= 0 ? n - 1 : suggest.index - 1;
+      markSuggestion();
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (open && suggest.index >= 0) pickSuggestion(suggest.index);
+      else { hideSuggestions(); els.query.focus(); }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      if (open) hideSuggestions();
+      else els.query.focus();
+    } else if (e.key === 'Tab' && open && suggest.index >= 0) {
+      e.preventDefault();
+      pickSuggestion(suggest.index);
+    }
+  }
+
+  els.chips.addEventListener('input', e => {
+    const field = e.target.dataset.f, root = e.target.closest('.qchip');
+    if (!field || !root || e.target.tagName === 'SELECT') return;
+    chipById(root.dataset.id)[field] = e.target.value;
+    chipChanged(root);
+    if (field === 'text') showSuggestions(e.target);
+  });
+
+  els.chips.addEventListener('change', e => {
+    const field = e.target.dataset.f, root = e.target.closest('.qchip');
+    if (!field || !root || e.target.tagName !== 'SELECT') return;
+    const chip = chipById(root.dataset.id);
+    chip[field] = e.target.value;
+    if (field === 'op') {
+      renderChips();
+      focusChip(chip);
+    }
+    chipChanged($(`.qchip[data-id="${chip.id}"]`, els.chips));
+  });
+
+  els.chips.addEventListener('click', e => {
+    const remove = e.target.closest('[data-f="remove"]');
+    if (remove) removeChip(remove.closest('.qchip').dataset.id);
+  });
+
+  els.chips.addEventListener('focusin', e => {
+    if (e.target.dataset.f === 'text') showSuggestions(e.target);
+    else hideSuggestions();
+  });
+  els.chips.addEventListener('focusout', e => {
+    if (e.target.dataset.f === 'text') hideSuggestions();
+  });
+
+  els.suggest.addEventListener('click', e => {
+    const item = e.target.closest('.menu-item');
+    if (item) pickSuggestion(+item.dataset.s);
+  });
+  els.suggest.addEventListener('mousemove', e => {
+    const item = e.target.closest('.menu-item');
+    if (item && +item.dataset.s !== suggest.index) { suggest.index = +item.dataset.s; markSuggestion(); }
+  });
 
   // ---- searching -------------------------------------------------------------------
 
@@ -508,7 +878,7 @@
     ['jpg|png', 'Either one'],
     ['!draft', 'Leave matches out — or NOT draft'],
     ['report OR invoice', 'Either word; AND is implied'],
-    ['ext:pdf OR (ext:docx AND draft)', 'OR, AND and (groups) work between any filters'],
+    ['ext:pdf OR size:>1gb', 'OR works between any filters'],
     ['"annual report"', 'An exact phrase'],
     ['*.log', 'Wildcards'],
     ['type:.pdf', 'By suffix — or ext:pdf'],
@@ -627,7 +997,14 @@
 
   function setQuery(text) {
     els.query.value = text;
-    state.query = text;
+    state.chips = [];
+    if (!state.options.regex) {
+      const { rest, chips } = pullChips(text);
+      state.chips = chips;
+      els.query.value = rest;
+    }
+    renderChips();
+    syncQuery();
     els.query.focus();
     newSearch();
   }
@@ -679,7 +1056,12 @@
   }
 
   function openOptionsMenu() {
-    const toggle = key => () => { state.options[key] = !state.options[key]; renderFilters(); newSearch(); };
+    const toggle = key => () => {
+      state.options[key] = !state.options[key];
+      if (key === 'regex') reflowChips();
+      renderFilters();
+      newSearch();
+    };
     const setting = key => () => { state.settings[key] = !state.settings[key]; saveSettings(); newSearch(); };
     menu.open($('#btn-options'), [
       { head: 'Sort by' },
@@ -705,7 +1087,10 @@
     if (action === 'searchHere') {
       const path = item.isDir ? pathOf(item) : item.dir;
       state.scope = { label: folderName(path), path };
-      els.query.value = state.query = '';
+      state.chips = [];
+      renderChips();
+      els.query.value = '';
+      syncQuery();
       renderFilters();
       newSearch();
       return;
@@ -1044,7 +1429,8 @@
   // ---- input -----------------------------------------------------------------------
 
   els.query.addEventListener('input', () => {
-    state.query = els.query.value;
+    if (convertTypedFilters()) return;
+    syncQuery();
     newSearch();
   });
 
@@ -1101,7 +1487,7 @@
       menu.close();
       if (reopen) { e.preventDefault(); e.stopPropagation(); menu.swallow = true; }
     }
-    if (state.view === 'main' && e.target !== els.query && e.target !== els.ext && !e.target.closest('.preview')) e.preventDefault();
+    if (state.view === 'main' && e.target !== els.query && e.target !== els.ext && !e.target.closest('.preview, .qchip')) e.preventDefault();
 
     // Empty parts of the top bar act as a title bar: dragging them moves the window.
     if (e.button === 0 && e.target.closest('.searchbar, .set-head') && !e.target.closest('input, button')) host.post({ type: 'drag' });
@@ -1125,6 +1511,9 @@
       return;
     }
 
+    // Inside a size/type form, keys belong to the form.
+    if (document.activeElement?.closest('.qchip')) return chipKey(e);
+
     // In the custom suffix box, typing stays there; Enter, Esc or Tab hands focus back to the search box.
     if (document.activeElement === els.ext) {
       if (['Enter', 'Escape', 'Tab'].includes(e.key)) { e.preventDefault(); els.query.focus(); return; }
@@ -1142,6 +1531,12 @@
       case 'Home': if (!ctrl) return; select(0); break;
       case 'End': if (!ctrl) return; select(state.items.length - 1); break;
       case 'Enter': if (ctrl) act('reveal'); else activate(); break;
+      case 'Backspace': {
+        // On an empty box, backspace takes the last size/type form away.
+        if (document.activeElement !== els.query || els.query.value !== '' || state.chips.length === 0) return;
+        removeChip(state.chips[state.chips.length - 1].id);
+        break;
+      }
       case 'Tab': {
         // Cycles the preset types; the custom suffix sits just outside the ring.
         const step = e.shiftKey ? -1 : 1;
@@ -1200,6 +1595,7 @@
       case 'init':
         state.settings = message.settings;
         state.places = message.places || [];
+        state.types = message.types || [];
         state.home = (state.places.find(p => p.label === 'Home') || {}).path || '';
         state.version = message.version || '';
         state.sort = state.settings.defaultSort || 'relevance';

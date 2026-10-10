@@ -70,7 +70,7 @@ svg.i { flex: none; display: block; }
 .window {
   position: relative;
   display: grid;
-  grid-template-rows: 62px 44px minmax(0, 1fr) 38px;
+  grid-template-rows: auto 44px minmax(0, 1fr) 38px;
   width: 100vw;
   height: 100vh;
   background: var(--surface);
@@ -82,13 +82,53 @@ svg.i { flex: none; display: block; }
 
 /* ---- search bar ------------------------------------------------------------------- */
 
+.searchblock { border-bottom: 1px solid var(--line); }
 .searchbar {
   display: flex;
   align-items: center;
   gap: 12px;
+  height: 62px;
   padding: 0 14px 0 20px;
-  border-bottom: 1px solid var(--line);
 }
+
+/* size: and type: become small forms under the text box. */
+.qchips { display: flex; flex-wrap: wrap; gap: 6px 8px; padding: 0 14px 10px 54px; }
+.qchips[hidden] { display: none; }
+.qchip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 3px 4px 3px 11px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+  animation: pop .12s var(--ease);
+}
+.qchip:focus-within { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.qchip.invalid { box-shadow: inset 0 0 0 1.5px #f04438; }
+.qchip-label { color: color-mix(in srgb, var(--accent) 80%, var(--text)); font-weight: 600; font-size: 12px; letter-spacing: .02em; }
+.qchip-text { color: var(--text-3); font-size: 12px; }
+.qchip select, .qchip input {
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--fill-strong);
+  color: var(--text);
+  font-size: 12.5px;
+  min-width: 0;
+}
+.qchip select { padding: 0 4px; cursor: pointer; }
+.qchip input { padding: 0 8px; cursor: text; user-select: text; }
+.qchip input::placeholder { color: var(--text-3); }
+.qchip input.num { width: 64px; text-align: right; font-variant-numeric: tabular-nums; }
+.qchip input.wide { width: 230px; }
+.qchip-x { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--text-2); }
+.qchip-x:hover { background: var(--fill-strong); color: var(--text); }
+.suggest { min-width: 260px; max-height: 300px; }
+.suggest .menu-item { height: auto; min-height: 30px; padding-top: 4px; padding-bottom: 4px; }
+.suggest .label b { font-weight: 600; }
+.suggest .sub { max-width: 150px; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 11px; }
 .searchbar-icon { color: var(--text-2); display: flex; }
 .searchbar-input {
   flex: 1;

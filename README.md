@@ -56,13 +56,20 @@ dotnet publish src/EasySearch -c Release -r win-x64 --self-contained false -o pu
 | `(ext:pdf OR ext:docx) AND draft` | parentheses group; `NOT (…)` excludes a whole group |
 | `"annual report"` | an exact phrase |
 | `*.log`, `img_????.jpg` | wildcards (match the whole name) |
-| `ext:pdf`, `ext:jpg;png`, `type:.pdf` | by extension (a dot after `type:` means a literal suffix) |
-| `type:image` | by kind: `folder`, `file`, `image`, `video`, `audio`, `document`, `code`, `archive`, `app` |
+| `ext:pdf`, `ext:jpg;png` | by extension |
+| `type:pdf`, `type:.fbx`, `type:png,jpg` | by suffix — the dot is optional |
+| `type:image`, `type:3d`, `type:blender`, `type:photoshop` | by kind or by the tool's name: `folder`, `file`, `image`, `video`, `audio`, `document`, `code`, `archive`, `app`, `3d`, `cad`, `spreadsheet`, `font`, `blender`, `word`, `python`, … (spaces and dashes are ignored: `3D models`) |
 | `size:>100mb`, `size:1mb..1gb`, `size:1mb-10mb`, `size:empty` | by size (`tiny` … `gigantic` also work; `size:1-10mb` borrows the unit) |
 | `dm:today`, `dm:7d`, `dm:2026-03`, `dm:>2026-01-01` | by date modified |
 | `in:C:\Projects` | only inside a folder |
 | `src\ main`, `path:backup` | a backslash (or `path:`) matches against the full path |
 | `regex:^IMG_\d+` | regular expressions |
+
+Typing `size:` or `type:` in the box turns it into a small form under the box, so you can see what
+to fill in: size takes *at least / at most / between / exactly*, a number and a **B / KB / MB / GB / TB**
+drop-down; type takes names and suffixes with suggestions as you type (`blender`, `3D`, `pdf`,
+`.fbx` …). Backspace on an empty box removes the last form, and the forms turn back into plain text
+as soon as you type `OR`, `NOT` or parentheses.
 
 Operators combine freely: `type:image dm:30d size:>2mb !screenshot`, or in words,
 `holiday AND type:.jpg NOT draft`.

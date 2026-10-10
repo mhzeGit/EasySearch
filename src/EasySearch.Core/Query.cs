@@ -251,8 +251,14 @@ static class QueryParser
                     if (negate) q.FoldersOnly = true; else q.FilesOnly = true;
                     break;
                 default:
-                    var extensions = FileKinds.Extensions(kind)
-                        ?? throw new FormatException($"Unknown type \"{kind}\". Try image, video, audio, document, code, archive, app or folder, or a suffix such as type:.pdf");
+                    // A kind or tool name (image, 3d, blender ...), or else a bare suffix: type:fbx is type:.fbx.
+                    var extensions = FileKinds.Extensions(kind);
+                    if (extensions is null)
+                    {
+                        if (kind.IndexOfAny(['\\', '/', ':', '"', '<', '>', '?', '*']) >= 0)
+                            throw new FormatException($"Can't read type \"{kind}\". Use a name such as image, 3d or blender, or a suffix such as pdf or .fbx");
+                        extensions = new HashSet<string>([kind], StringComparer.OrdinalIgnoreCase);
+                    }
                     if (negate) (q.ForbiddenExtensions ??= NewSet()).UnionWith(extensions);
                     else required.UnionWith(extensions);
                     break;
