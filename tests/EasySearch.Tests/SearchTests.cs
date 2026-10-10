@@ -104,6 +104,26 @@ public sealed class SearchTests : IDisposable
     }
 
     [Fact]
+    public void Multiple_inside_filters_require_all_parent_folders_in_either_order()
+    {
+        Write(@"blahblahfamily\unity\deep\nested.txt", 1, daysOld: 0);
+        Write(@"unity\blahblahfamily\reverse.txt", 1, daysOld: 0);
+        Write(@"unity\unrelated.txt", 1, daysOld: 0);
+        Write(@"blahblahfamily\outside.txt", 1, daysOld: 0);
+        var index = IndexBuilder.Build(Scope());
+
+        Assert.Equal(["nested.txt", "reverse.txt"],
+            Names("inside:blahblahfamily and inside:unity type:file", index: index));
+        Assert.Equal(["nested.txt", "reverse.txt"],
+            Names("in:unity inside:blahblahfamily type:file", index: index));
+        Assert.Equal(["deep", "nested.txt", "reverse.txt"],
+            Names("inside:unity inside:blahblahfamily", index: index));
+        Assert.Empty(Names("inside:docs inside:photos", index: index));
+        Assert.Equal(["notes.txt", "Program.cs", "README.md"],
+            Names("(inside:src (inside:app OR inside:docs)) OR (inside:docs name:notes.txt)", index: index));
+    }
+
+    [Fact]
     public void Extension_and_type_filters()
     {
         Assert.Equal(["holiday.png", "IMG_0001.JPG", "IMG_0002.jpg"], Names("type:image"));

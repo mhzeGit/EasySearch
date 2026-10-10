@@ -313,7 +313,7 @@ public static class SearchEngine
         readonly Term[] _terms = [.. query.Terms];
         readonly HashSet<string>[] _required = [.. query.RequiredExtensions];
         readonly StringComparison _comparison = query.Comparison;
-        readonly string? _inside = query.Inside;
+        readonly string[] _inside = [.. query.Inside];
         readonly long _now = DateTime.UtcNow.Ticks;
         readonly EntryFlags _skip = EntryFlags.Deleted
             | (query.ShowHidden ? 0 : EntryFlags.Hidden | EntryFlags.HiddenTree)
@@ -343,7 +343,8 @@ public static class SearchEngine
             }
 
             var name = snapshot.Name(i);
-            if (_inside is { Length: > 0 } inside && !HasParentFolderNamed(snapshot, i, inside)) return false;
+            foreach (var inside in _inside)
+                if (!HasParentFolderNamed(snapshot, i, inside)) return false;
             if (_required.Length > 0 || query.ForbiddenExtensions is not null)
             {
                 if (isDirectory)

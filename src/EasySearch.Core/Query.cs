@@ -59,7 +59,7 @@ sealed class CompiledQuery
     public long SizeMin, SizeMax = long.MaxValue;
     public long ModifiedMin = long.MinValue, ModifiedMax = long.MaxValue; // [min, max) in UTC ticks
     public string? Scope;
-    public string? Inside;
+    public readonly List<string> Inside = [];
     public bool IgnoreCase = true;
     public bool ShowHidden, ShowSystem;
     /// <summary>The term whose match position drives relevance ranking, or -1.</summary>
@@ -178,7 +178,7 @@ static class QueryParser
 
                 case "inside" or "foldername" or "folder-name":
                     if (negate) throw NotUnsupported(key);
-                    if (value.Length > 0) q.Inside = value;
+                    if (value.Length > 0) q.Inside.Add(value);
                     return;
 
                 case "path":
