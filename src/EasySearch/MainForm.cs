@@ -505,6 +505,7 @@ public sealed partial class MainForm : Form
                 CoreWebView2HostResourceAccessKind.Allow);
             core.AddWebResourceRequestedFilter($"https://{ImageHost}/*", CoreWebView2WebResourceContext.All);
             core.WebResourceRequested += OnImageRequested;
+            InitializeVideoPreview(core);
             core.WebMessageReceived += OnWebMessage;
             core.NewWindowRequested += (_, e) => e.Handled = true;
             core.NavigationCompleted += OnNavigationCompleted;
@@ -523,6 +524,7 @@ public sealed partial class MainForm : Form
     void OnImageRequested(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
     {
         var uri = new Uri(e.Request.Uri);
+        if (uri.Host != ImageHost) return;
         var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
         string? path = query["p"];
         if (string.IsNullOrEmpty(path) || !int.TryParse(query["s"], out int size))

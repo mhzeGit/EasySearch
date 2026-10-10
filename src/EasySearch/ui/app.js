@@ -17,6 +17,8 @@
       }
     : window.createMockHost();
   if (!inHost) document.documentElement.classList.add('mock'); // plain browser: draw a stand-in desktop
+  const videoPreview = new VideoPreview(message => host.post(message));
+  let paletteVisible = true;
 
   // ---- icons -----------------------------------------------------------------------
 
@@ -919,11 +921,19 @@
   let previewTimer = 0;
   let renderedPreviewKey = null;
 
+  function clearPreview() {
+    videoPreview.clear();
+    clearTimeout(previewTimer);
+    ++state.previewId;
+    renderedPreviewKey = null;
+  }
+
   function renderPreview() {
-    if (!state.settings?.showPreview) return;
+    if (!state.settings?.showPreview || !paletteVisible || state.view !== 'main') return;
     const item = selectedItem();
     if (!item || item.command) {
       if (renderedPreviewKey === 'tips') return;
+      clearPreview();
       renderedPreviewKey = 'tips';
       els.preview.innerHTML = `
         <div class="tips-title">Search like a pro</div>
@@ -933,8 +943,9 @@
     }
 
     const path = pathOf(item);
-    const previewKey = path;
+    const previewKey = `${path}|${item.modified}|${item.size}`;
     if (renderedPreviewKey === previewKey) return;
+    clearPreview();
     renderedPreviewKey = previewKey;
     const kind = kindOf(item);
     const visual = kind === 'image' || kind === 'video' || extOf(item.name) === 'pdf';
@@ -953,6 +964,9 @@
         ${item.hidden ? '<dt>Attributes</dt><dd>Hidden</dd>' : ''}
       </dl>
       <pre class="pv-text" id="pv-text" hidden></pre>`;
+
+    if (hosted && paletteVisible && state.view === 'main' && kind === 'video')
+      videoPreview.select(path, els.preview.querySelector('.pv-hero'));
 
     clearTimeout(previewTimer);
     if (!item.isDir && item.size > 0 && (kind === 'code' || kind === 'file' || ['txt', 'md', 'csv', 'log'].includes(extOf(item.name)))) {
@@ -1232,9 +1246,11 @@
     const s = state.settings;
     document.documentElement.style.setProperty('--accent', s.accent);
     els.window.classList.toggle('no-preview', !s.showPreview);
+    if (!s.showPreview) clearPreview();
   }
 
   function openSettings(tab) {
+    clearPreview();
     menu.close();
     if (tab) state.settingsTab = tab;
     state.view = 'settings';
@@ -1751,6 +1767,12 @@
         }
         break;
       case 'preview': onPreviewText(message); break;
+      case 'videoSource': videoPreview.source(message); break;
+      case 'paletteVisibility':
+        paletteVisible = message.visible;
+        if (!paletteVisible) clearPreview();
+        else if (state.view === 'main') renderPreview();
+        break;
       case 'folderPicked': onFolderPicked(message); break;
       case 'toast': toast(message.text, message.error); break;
       case 'openSettings': openSettings(); break;

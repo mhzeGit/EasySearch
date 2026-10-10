@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\EasySearch.Core\EasySearch.Core.csproj" />
+    <Compile Include="..\..\src\EasySearch\VideoByteRange.cs" Link="VideoByteRange.cs" />
   </ItemGroup>
 
   <ItemGroup>
