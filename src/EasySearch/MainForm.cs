@@ -335,6 +335,10 @@ public sealed partial class MainForm : Form
 
     public void ShowPalette()
     {
+        // Looked at before the palette takes focus: this is the window the user was working in.
+        var explorer = _settings.ScopeToExplorer && IsHandleCreated ? ExplorerFolder.ForegroundExplorer(Handle) : IntPtr.Zero;
+        var folder = explorer != IntPtr.Zero ? ExplorerFolder.FolderAsync(explorer) : null;
+
         Show(); // positions the window and captures the backdrop when it was hidden
         // Hide-on-blur must not fire while focus is being moved onto the palette.
         _suppressHide = true;
@@ -344,7 +348,34 @@ public sealed partial class MainForm : Form
         if (!_options.Passive) _web.Focus();
         Mark("web-focused");
         Post(new { type = "shown" });
+        if (_settings.ScopeToExplorer) PostExplorerFolder(folder);
         if (Tracing) Trace("show steps:" + _marks);
+    }
+
+    /// <summary>
+    /// Tells the interface which Explorer folder (if any) the palette was opened from. The lookup
+    /// runs off the UI thread, so the palette appears at once and the folder follows a moment later.
+    /// </summary>
+    void PostExplorerFolder(Task<string?>? folder)
+    {
+        if (folder is null)
+        {
+            Post(new { type = "explorerFolder", path = (string?)null });
+            return;
+        }
+
+        folder.ContinueWith(task =>
+        {
+            string? path = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
+            try
+            {
+                if (IsHandleCreated && !IsDisposed) BeginInvoke(() => Post(new { type = "explorerFolder", path }));
+            }
+            catch (InvalidOperationException)
+            {
+                // The window went away while the lookup was running.
+            }
+        }, TaskScheduler.Default);
     }
 
     /// <summary>

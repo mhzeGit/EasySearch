@@ -228,6 +228,25 @@ public sealed class SearchTests : IDisposable
     }
 
     [Fact]
+    public void Friendly_operator_names()
+    {
+        // date: is the plain-English name for dm:; location, source and inside: for in:.
+        var today = Names("dm:today type:file");
+        Assert.Equal(["notes.txt"], today);
+        foreach (var name in new[] { "date", "modified", "changed", "updated", "datemodified" })
+            Assert.Equal(today, Names($"{name}:today type:file"));
+
+        var src = Path.Combine(_root, "src");
+        var inside = Names($"in:\"{src}\"");
+        foreach (var name in new[] { "source", "location", "inside", "where", "under" })
+            Assert.Equal(inside, Names($"{name}:\"{src}\""));
+
+        // They also join up with OR, like any other filter.
+        Assert.Equal(Names("date:today OR size:empty").OrderBy(n => n), Names("dm:today").Union(Names("size:empty")).OrderBy(n => n));
+        Assert.Contains("date:", Error("date:nonsense")!); // errors use the friendly name too
+    }
+
+    [Fact]
     public void Path_and_scope()
     {
         Assert.Equal(["Program.cs", "README.md"], Names(@"src\app\ type:file"));

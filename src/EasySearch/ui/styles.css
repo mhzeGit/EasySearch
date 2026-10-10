@@ -125,6 +125,9 @@ svg.i { flex: none; display: block; }
 .qchip input::placeholder { color: var(--text-3); }
 .qchip input.num { width: 54px; text-align: right; font-variant-numeric: tabular-nums; }
 .qchip input.wide { width: 230px; }
+.qchip input.date { width: 112px; padding: 0 5px 0 7px; font-variant-numeric: tabular-nums; }
+.qchip input[type="date"]::-webkit-calendar-picker-indicator { width: 12px; margin: 0 0 0 2px; padding: 0; opacity: .7; cursor: pointer; }
+.qchip input[type="date"]::-webkit-datetime-edit { padding: 0; }
 .qchip-x { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 9px; color: var(--text-2); }
 .qchip-x:hover { background: var(--fill-strong); color: var(--text); }
 .suggest { min-width: 260px; max-height: 300px; }

@@ -30,6 +30,9 @@ public sealed class AppSettings
     public bool LaunchAtLogin { get; set; }
     public bool ShowPreview { get; set; } = true;
 
+    /// <summary>When opened from a File Explorer window, search that window's folder.</summary>
+    public bool ScopeToExplorer { get; set; } = true;
+
     /// <summary>Folders and drives to index.</summary>
     public List<string> Roots { get; set; } = [];
     /// <summary>Folder names (anywhere) or full folder paths left out of the index.</summary>

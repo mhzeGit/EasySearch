@@ -163,14 +163,14 @@ static class QueryParser
                     q.HasSize = true;
                     return;
 
-                case "dm" or "modified" or "date" or "datemodified":
+                case "date" or "dm" or "modified" or "datemodified" or "changed" or "updated":
                     if (negate) throw NotUnsupported(key);
                     if (!TryParseDate(value, now, ref q.ModifiedMin, ref q.ModifiedMax))
-                        throw new FormatException($"Can't read date \"{value}\". Try dm:today, dm:7d or dm:>2026-01-01");
+                        throw new FormatException($"Can't read date \"{value}\". Try date:today, date:7d or date:>2026-01-01");
                     q.HasDate = true;
                     return;
 
-                case "in" or "under" or "parent":
+                case "in" or "source" or "location" or "inside" or "where" or "under" or "parent":
                     if (negate) throw NotUnsupported(key);
                     if (value.Length > 0) q.Scope = value;
                     return;
@@ -195,7 +195,7 @@ static class QueryParser
     }
 
     static FormatException NotUnsupported(string key) =>
-        new($"NOT can't be used with {key}:. Describe the range you want instead, e.g. size:<1mb or dm:>2026-01-01");
+        new($"NOT can't be used with {key}:. Describe the range you want instead, e.g. size:<1mb or date:>2026-01-01");
 
     static void AddTextTerm(CompiledQuery q, string text, bool negate, bool onPath, bool forceName)
     {

@@ -85,6 +85,34 @@ window.createMockHost = () => {
     const m = /^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb)?$/.exec(text.trim());
     return m ? parseFloat(m[1]) * { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3, tb: 1024 ** 4 }[m[2] || 'b'] : NaN;
   };
+  /** Start of a day, month or year ("2026-03-14", "2026-03", "2026"), or just after it with end. */
+  const periodMs = (text, end) => {
+    const m = /^(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?$/.exec(text);
+    if (!m) return NaN;
+    const y = +m[1], mo = m[2] ? +m[2] - 1 : 0, d = m[3] ? +m[3] : 1;
+    if (!end) return new Date(y, mo, d).getTime();
+    return (m[3] ? new Date(y, mo, d + 1) : m[2] ? new Date(y, mo + 1, 1) : new Date(y + 1, 0, 1)).getTime();
+  };
+  /** date: values as [from, to): today, 7d, this week, >2026-01-01, 2026-01..2026-03 ... */
+  const dateRange = value => {
+    const today = new Date().setHours(0, 0, 0, 0), now = new Date();
+    const unit = { h: 3600e3, d: DAY, w: 7 * DAY, m: 30 * DAY, y: 365 * DAY };
+    let m;
+    if (value === 'today') return [today, today + DAY];
+    if (value === 'yesterday') return [today - DAY, today];
+    if (value === 'week' || value === 'thisweek') return [today - ((now.getDay() + 6) % 7) * DAY, Infinity];
+    if (value === 'month' || value === 'thismonth') return [new Date(now.getFullYear(), now.getMonth(), 1).getTime(), Infinity];
+    if (value === 'year' || value === 'thisyear') return [new Date(now.getFullYear(), 0, 1).getTime(), Infinity];
+    if ((m = /^(\d+)([hdwmy])$/.exec(value))) return [Date.now() - m[1] * unit[m[2]], Infinity];
+    if ((m = /^>=?(.+)$/.exec(value))) return [periodMs(m[1], false), Infinity];
+    if ((m = /^<=(.+)$/.exec(value))) return [-Infinity, periodMs(m[1], true)];
+    if ((m = /^<(.+)$/.exec(value))) return [-Infinity, periodMs(m[1], false)];
+    if (value.includes('..')) {
+      const [a, b] = value.split('..');
+      return [a ? periodMs(a, false) : -Infinity, b ? periodMs(b, true) : Infinity];
+    }
+    return [periodMs(value, false), periodMs(value, true)];
+  };
   /** size: values as [min, max]; understands >=, <=, >, <, =, a..b and a-b. */
   const sizeRange = value => {
     let m;
@@ -101,7 +129,7 @@ window.createMockHost = () => {
   let settings = {
     theme: 'system', accent: '#0a84ff', hotkey: 'Alt+Space', hideOnBlur: true, launchAtLogin: false, showPreview: true,
     roots: ['C:\\', 'D:\\'], excluded: ['$Recycle.Bin', 'System Volume Information', 'node_modules', '.git', 'C:\\Windows\\WinSxS'],
-    showHidden: false, showSystem: false, defaultSort: 'relevance',
+    showHidden: false, showSystem: false, defaultSort: 'relevance', scopeToExplorer: true,
   };
   const status = { type: 'status', indexing: false, items: 1474675, scanned: 0, version: 1, lastIndexed: Date.now() - 4 * 60000, durationMs: 9280 };
   const systemTheme = () => (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
@@ -114,7 +142,7 @@ window.createMockHost = () => {
   function search(request) {
     const started = performance.now();
     const terms = [];
-    let extFilter = null, error = null, typeFilter = null, sizeFilter = null;
+    let extFilter = null, error = null, typeFilter = null, sizeFilter = null, dateFilter = null, folderFilter = null;
     // The mock only understands the symbols, so spell the capitalised logic words that way.
     const spelled = request.query.replace(/\s+(OR|or|\|\|)\s+/g, '|').replace(/\b(AND|and|&&)\s+/g, '')
       .replace(/\bNOT\s+/g, '!').replace(/[()]/g, '');
@@ -123,6 +151,12 @@ window.createMockHost = () => {
       if (text.startsWith('ext:')) extFilter = text.slice(4).split(/[;,|]/);
       else if (/^(type|kind):/.test(text)) {
         typeFilter = [...(typeFilter || []), ...text.slice(text.indexOf(':') + 1).split(/[;,|]/).filter(Boolean).flatMap(typeExts)];
+      } else if (/^(date|dm|modified|changed|updated|datemodified):/.test(text)) {
+        const range = dateRange(text.slice(text.indexOf(':') + 1));
+        if (range.some(Number.isNaN)) error = `Can't read date "${text.slice(text.indexOf(':') + 1)}". Try date:today, date:7d or date:>2026-01-01`;
+        else dateFilter = range;
+      } else if (/^(in|source|location|inside|where|under|parent):/.test(text)) {
+        folderFilter = text.slice(text.indexOf(':') + 1).replace(/\\$/, '');
       } else if (text.startsWith('size:')) {
         const range = sizeRange(text.slice(5));
         if (range.some(Number.isNaN)) error = `Can't read size "${text.slice(5)}". Try size:>10mb or size:1mb..1gb`;
@@ -142,6 +176,8 @@ window.createMockHost = () => {
       if (extFilter && (file.isDir || !extFilter.includes(ext(file.name)))) return false;
       if (typeFilter && (file.isDir || !typeFilter.includes(ext(file.name)))) return false;
       if (sizeFilter && (file.isDir || file.size < sizeFilter[0] || file.size > sizeFilter[1])) return false;
+      if (dateFilter && (file.modified < dateFilter[0] || file.modified >= dateFilter[1])) return false;
+      if (folderFilter && !`${file.dir}\\`.toLowerCase().startsWith(`${folderFilter}\\`)) return false;
       if (customExts.length && (file.isDir || !customExts.includes(ext(file.name)))) return false;
       if (request.sizeMin != null && (file.isDir || file.size < request.sizeMin)) return false;
       if (request.sizeMax != null && (file.isDir || file.size > request.sizeMax)) return false;

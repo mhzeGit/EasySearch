@@ -21,6 +21,9 @@ Press **Win+Space** anywhere, type a few letters, hit Enter.
   inside this folder" — as one-click chips or typed operators.
 - **Scope control.** Pick which drives and folders are indexed and which folders are left out
   (by name anywhere, like `node_modules`, or by full path). Hidden and system items are opt-in.
+- **Searches where you are.** Press the hotkey while a File Explorer window has focus and EasySearch
+  searches that window's folder (its current tab); from any other app it searches everywhere. Turn
+  this off in **Settings → Search**.
 - **Palette workflow.** Global hotkey, keyboard-first, the same icons Explorer shows, a preview pane with
   thumbnails and text snippets, and an actions menu (open, reveal, copy path, open in Terminal…).
 - **Looks the part.** A blurred, see-through window in light or dark, with a choice of accent colour.
@@ -60,18 +63,20 @@ dotnet publish src/EasySearch -c Release -r win-x64 --self-contained false -o pu
 | `type:pdf`, `type:.fbx`, `type:png,jpg` | by suffix — the dot is optional |
 | `type:image`, `type:3d`, `type:blender`, `type:photoshop` | by kind or by the tool's name: `folder`, `file`, `image`, `video`, `audio`, `document`, `code`, `archive`, `app`, `3d`, `cad`, `spreadsheet`, `font`, `blender`, `word`, `python`, … (spaces and dashes are ignored: `3D models`) |
 | `size:>100mb`, `size:1mb..1gb`, `size:1mb-10mb`, `size:empty` | by size (`tiny` … `gigantic` also work; `size:1-10mb` borrows the unit) |
-| `dm:today`, `dm:7d`, `dm:2026-03`, `dm:>2026-01-01` | by date modified |
-| `in:C:\Projects` | only inside a folder |
+| `date:today`, `date:7d`, `date:2026-03`, `date:>2026-01-01`, `date:2026-01..2026-03` | by date modified (`modified:` and `dm:` work too) |
+| `in:C:\Projects` | only inside a folder (`source:`, `location:`, `inside:` work too) |
 | `src\ main`, `path:backup` | a backslash (or `path:`) matches against the full path |
 | `regex:^IMG_\d+` | regular expressions |
 
-Typing `size:` or `type:` in the box turns it into a small form under the box, so you can see what
-to fill in: size takes *at least / at most / between / exactly*, a number and a **B / KB / MB / GB / TB**
-drop-down; type takes names and suffixes with suggestions as you type (`blender`, `3D`, `pdf`,
-`.fbx` …). Backspace on an empty box removes the last form, and the forms turn back into plain text
+Typing `size:`, `type:`, `date:` or `in:` in the box turns it into a small form under the box, so you
+can see what to fill in: size takes *at least / at most / between / exactly*, a number and a
+**B / KB / MB / GB / TB** drop-down; type takes names and suffixes with suggestions as you type
+(`blender`, `3D`, `pdf`, `.fbx` …); date takes *in the last N days… / today / this week / on /
+before / after / between* with a calendar; folder takes a path or a pick from your places.
+Backspace on an empty box removes the last form, and the forms turn back into plain text
 as soon as you type `OR`, `NOT` or parentheses.
 
-Operators combine freely: `type:image dm:30d size:>2mb !screenshot`, or in words,
+Operators combine freely: `type:image date:30d size:>2mb !screenshot`, or in words,
 `holiday AND type:.jpg NOT draft`.
 
 `AND` and `OR` also work in lower case (and as `&&` / `||`), but only while the query still makes
@@ -81,7 +86,7 @@ plain text, and a parenthesis that does not pair up (`report (1`) is part of the
 
 `OR` binds the two things next to it more tightly than `AND` or a space (`a OR b c` is
 "(a or b) and c"), exactly like `a|b`; use parentheses for anything else. `NOT` can't be used with
-`size:`, `dm:` or `in:` — say the range you want instead (`size:<1mb`).
+`size:`, `date:` or `in:` — say the range you want instead (`size:<1mb`).
 
 ### Keys
 
@@ -141,7 +146,7 @@ Measured on the development machine (12 logical cores, NVMe, 1.47 million items)
 | Full scan | 9 s with a warm file cache, about 35 s cold |
 | Memory | about 125 MB |
 | Typical query (`readme !node`, `*.csproj`) | 4 ms |
-| Filter-only query (`type:image dm:30d`) | 30 ms |
+| Filter-only query (`type:image date:30d`) | 30 ms |
 | Single letter (937,000 matches) | 100 ms |
 | Hotkey to palette on screen | about 70 ms (interface ready at about 120 ms) |
 | Idle in the background | about 0.05% of the machine's CPU |

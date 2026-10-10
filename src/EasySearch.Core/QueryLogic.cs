@@ -191,8 +191,8 @@ static class QueryLogic
     // ---- helpers ------------------------------------------------------------------------
 
     static readonly HashSet<string> OperatorKeys = new(StringComparer.OrdinalIgnoreCase)
-        { "ext", "type", "kind", "folder", "folders", "file", "files", "size", "dm", "modified", "date", "datemodified",
-          "in", "under", "parent", "path", "name", "regex" };
+        { "ext", "type", "kind", "folder", "folders", "file", "files", "size", "date", "dm", "modified", "datemodified", "changed", "updated",
+          "in", "source", "location", "inside", "where", "under", "parent", "path", "name", "regex" };
 
     /// <summary>Operators whose values are lists, so <c>a OR b</c> can become <c>key:a|b</c>.</summary>
     static readonly HashSet<string> JoinableKeys = new(StringComparer.OrdinalIgnoreCase) { "ext", "type", "kind", "path", "name" };

@@ -198,7 +198,7 @@
       }
       if (negated) { negated = false; continue; } // the word after NOT is excluded, not matched
       if (text.startsWith('!')) continue;
-      if (/^(ext|type|kind|size|dm|modified|date|datemodified|in|under|parent|path|regex|folders?|files?):/i.test(text)) continue;
+      if (/^(ext|type|kind|size|dm|modified|date|datemodified|changed|updated|in|source|location|inside|where|under|parent|path|regex|folders?|files?):/i.test(text)) continue;
       text = text.replace(/^name:/i, '');
       for (let part of text.split('|')) {
         if (/[*?]/.test(part)) continue;
@@ -305,6 +305,76 @@
 
   const newSizeChip = (fields = {}) => ({ id: ++chipSeq, kind: 'size', op: 'min', lo: '', loUnit: 'MB', hi: '', hiUnit: 'MB', ...fields });
   const newTypeChip = (text = '') => ({ id: ++chipSeq, kind: 'type', text });
+
+  const DATE_OPS = [
+    { id: 'last', label: 'in the last' },
+    { id: 'today', label: 'today' },
+    { id: 'yesterday', label: 'yesterday' },
+    { id: 'week', label: 'this week' },
+    { id: 'month', label: 'this month' },
+    { id: 'year', label: 'this year' },
+    { id: 'on', label: 'on' },
+    { id: 'before', label: 'before' },
+    { id: 'after', label: 'after' },
+    { id: 'between', label: 'between' },
+  ];
+  const DATE_UNITS = [
+    { id: 'h', label: 'hours' }, { id: 'd', label: 'days' }, { id: 'w', label: 'weeks' },
+    { id: 'm', label: 'months' }, { id: 'y', label: 'years' },
+  ];
+  const newDateChip = (fields = {}) => ({ id: ++chipSeq, kind: 'date', op: 'last', n: '', unit: 'd', d1: '', d2: '', ...fields });
+  const newPlaceChip = (path = '') => ({ id: ++chipSeq, kind: 'place', path });
+
+  /** Every spelling of a filter the backend accepts, and the form it opens. */
+  const FILTER_FORM = {
+    size: 'size', type: 'type',
+    date: 'date', dm: 'date', modified: 'date', changed: 'date', updated: 'date', datemodified: 'date',
+    in: 'place', source: 'place', location: 'place', inside: 'place', where: 'place',
+  };
+  const FILTER_PATTERN = new RegExp(`(^|\\s)(${Object.keys(FILTER_FORM).join('|')}):("[^"]*"|\\S*)`, 'gi');
+
+  const pad2 = n => String(n).padStart(2, '0');
+
+  /** "2026-03-14", "2026-03" or "2026" as an ISO day (the first day, or the last with end), or null. */
+  function isoDay(text, end) {
+    let m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(text);
+    if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+    m = /^(\d{4})-(\d{1,2})$/.exec(text);
+    if (m) return `${m[1]}-${pad2(m[2])}-${end ? pad2(new Date(+m[1], +m[2], 0).getDate()) : '01'}`;
+    m = /^(\d{4})$/.exec(text);
+    return m ? `${m[1]}-${end ? '12-31' : '01-01'}` : null;
+  }
+
+  /** Form fields for a typed date value, or null when the form can't show it. */
+  function dateFields(value) {
+    value = value.trim().toLowerCase();
+    if (!value) return {};
+
+    const preset = { today: 'today', yesterday: 'yesterday', week: 'week', thisweek: 'week', month: 'month', thismonth: 'month', year: 'year', thisyear: 'year' }[value];
+    if (preset) return { op: preset };
+
+    let m = /^(\d{1,5})([hdwmy])$/.exec(value);
+    if (m) return { op: 'last', n: m[1], unit: m[2] };
+
+    if ((m = /^(>=|>|<=|<)(.+)$/.exec(value))) {
+      const day = isoDay(m[2], m[1] === '<=');
+      if (!day) return null;
+      if (m[1][0] === '>') return { op: 'after', d1: day };
+      return m[1] === '<' ? { op: 'before', d1: day } : { op: 'between', d1: '', d2: day };
+    }
+
+    const dots = value.indexOf('..');
+    if (dots >= 0) {
+      const a = value.slice(0, dots), b = value.slice(dots + 2);
+      const d1 = a ? isoDay(a, false) : '', d2 = b ? isoDay(b, true) : '';
+      if ((a && !d1) || (b && !d2) || (!a && !b)) return null;
+      return { op: 'between', d1, d2 };
+    }
+
+    if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(value)) return { op: 'on', d1: isoDay(value, false) };
+    const first = isoDay(value, false);
+    return first ? { op: 'between', d1: first, d2: isoDay(value, true) } : null; // a whole month or year
+  }
   const normName = text => text.toLowerCase().replace(/[\s_-]/g, '');
 
   /** "10mb", "1.5 GB" or "500" -> { n: '10', unit: 'MB' }; null when it isn't an amount. */
@@ -345,21 +415,30 @@
 
   function chipFromToken(key, value) {
     value = value.replace(/^"|"$/g, '');
-    if (key === 'size') {
-      const fields = sizeFields(value);
-      return fields ? newSizeChip(fields) : null;
+    switch (FILTER_FORM[key]) {
+      case 'size': {
+        const fields = sizeFields(value);
+        return fields ? newSizeChip(fields) : null;
+      }
+      case 'date': {
+        const fields = dateFields(value);
+        return fields ? newDateChip(fields) : null;
+      }
+      case 'place':
+        return newPlaceChip(value);
+      default:
+        return newTypeChip(value.split(/[;|,]+/).filter(Boolean).join(', '));
     }
-    return newTypeChip(value.split(/[;|,]+/).filter(Boolean).join(', '));
   }
 
   /** Logic (OR, NOT, parentheses) can't be expressed as AND-ed forms, so such queries stay text. */
   const hasLogic = text => /(^|\s)(OR|or|NOT|\|\|?)(\s|$)|[()]/.test(text);
 
-  /** Lifts size: and type: tokens out of a piece of text into chips (ext: and kind: stay as typed). */
+  /** Lifts size:, type:, date: and in: tokens (and their other names) out of a piece of text into forms. */
   function pullChips(text) {
     const chips = [];
     if (hasLogic(text)) return { rest: text, chips };
-    const rest = text.replace(/(^|\s)(type|size):("[^"]*"|\S*)/gi, (all, lead, key, value) => {
+    const rest = text.replace(FILTER_PATTERN, (all, lead, key, value) => {
       const chip = chipFromToken(key.toLowerCase(), value);
       if (!chip) return all;
       chips.push(chip);
@@ -391,6 +470,24 @@
       const words = typeWords(chip.text);
       return words.length ? `type:${words.join(',')}` : null;
     }
+    if (chip.kind === 'place') {
+      const path = chip.path.trim().replace(/^"|"$/g, '');
+      return path ? (/\s/.test(path) ? `in:"${path}"` : `in:${path}`) : null;
+    }
+    if (chip.kind === 'date') {
+      const iso = d => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? d : '');
+      switch (chip.op) {
+        case 'last': return /^\d+$/.test(chip.n.trim()) ? `date:${chip.n.trim()}${chip.unit}` : null;
+        case 'on': return iso(chip.d1) ? `date:${iso(chip.d1)}` : null;
+        case 'before': return iso(chip.d1) ? `date:<${iso(chip.d1)}` : null;
+        case 'after': return iso(chip.d1) ? `date:>${iso(chip.d1)}` : null;
+        case 'between': {
+          const a = iso(chip.d1), b = iso(chip.d2);
+          return a && b ? `date:${a}..${b}` : a ? `date:>=${a}` : b ? `date:<=${b}` : null;
+        }
+        default: return `date:${chip.op}`;
+      }
+    }
     const lo = amount(chip.lo), hi = amount(chip.hi);
     const side = (n, unit) => n + unit.toLowerCase();
     switch (chip.op) {
@@ -406,6 +503,7 @@
   }
 
   function chipValid(chip) {
+    if (chip.kind === 'date') return chip.op !== 'last' || !chip.n.trim() || /^\d+$/.test(chip.n.trim());
     if (chip.kind !== 'size') return true;
     const bad = text => text.trim() && !amount(text);
     return !(bad(chip.lo) || (chip.op === 'between' && bad(chip.hi)));
@@ -427,6 +525,23 @@
       return `<div class="qchip" data-id="${chip.id}"><span class="qchip-label">Type</span>
         <input class="wide" data-f="text" value="${esc(chip.text)}" placeholder="blender, image, 3D, pdf, .fbx" aria-label="File types" ${attrs}>${remove}</div>`;
 
+    if (chip.kind === 'place')
+      return `<div class="qchip" data-id="${chip.id}"><span class="qchip-label">Folder</span>
+        <input class="wide" data-f="path" value="${esc(chip.path)}" placeholder="C:\\Projects  (or pick one)" aria-label="Folder to search in" ${attrs}>
+        <button class="qsel" data-f="places" aria-haspopup="menu" aria-label="Choose a folder">${icon('folder', 13)}${icon('chevron', 12)}</button>${remove}</div>`;
+
+    if (chip.kind === 'date') {
+      const day = (field, value, name) => `<input type="date" class="date" data-f="${field}" value="${esc(value)}" aria-label="${name}">`;
+      let fields = '';
+      if (chip.op === 'last')
+        fields = `<input class="num" data-f="n" value="${esc(chip.n)}" placeholder="7" inputmode="numeric" aria-label="How many" ${attrs}>
+          ${choice('unit', DATE_UNITS.find(u => u.id === chip.unit).label, 'Unit')}`;
+      else if (['on', 'before', 'after'].includes(chip.op)) fields = day('d1', chip.d1, 'Date');
+      else if (chip.op === 'between') fields = `${day('d1', chip.d1, 'From')}<span class="qchip-text">and</span>${day('d2', chip.d2, 'To')}`;
+      return `<div class="qchip${chipValid(chip) ? '' : ' invalid'}" data-id="${chip.id}"><span class="qchip-label">Date</span>
+        ${choice('op', DATE_OPS.find(o => o.id === chip.op).label, 'When')}${fields}${remove}</div>`;
+    }
+
     const between = chip.op === 'between';
     return `<div class="qchip${chipValid(chip) ? '' : ' invalid'}" data-id="${chip.id}"><span class="qchip-label">Size</span>
       ${choice('op', SIZE_OPS.find(o => o.id === chip.op).label, 'Comparison')}
@@ -446,10 +561,10 @@
 
   function focusChip(chip) {
     const root = $(`.qchip[data-id="${chip.id}"]`, els.chips);
-    const field = root && $('[data-f="lo"], [data-f="text"]', root);
-    if (!field) return;
+    const field = root && $('[data-f="lo"], [data-f="text"], [data-f="n"], [data-f="d1"], [data-f="path"]', root);
+    if (!field) return els.query.focus();
     field.focus();
-    field.select();
+    try { field.select(); } catch { /* date inputs have no text to select */ }
   }
 
   const chipById = id => state.chips.find(c => c.id === +id);
@@ -623,21 +738,43 @@
 
   function openChipMenu(button) {
     const chip = chipById(button.closest('.qchip').dataset.id), field = button.dataset.f;
-    const options = field === 'op' ? SIZE_OPS : SIZE_UNITS.map(u => ({ id: u, label: u }));
+    if (field === 'places') return openPlacesMenu(chip, button);
+
+    let options;
+    if (field === 'op') options = chip.kind === 'date' ? DATE_OPS : SIZE_OPS;
+    else if (field === 'unit') options = DATE_UNITS;
+    else options = SIZE_UNITS.map(u => ({ id: u, label: u }));
+
     menu.open(button, options.map(o => ({
       label: o.label,
       checked: o.id === chip[field],
       run: () => {
         chip[field] = o.id;
         renderChips();
-        const root = $(`.qchip[data-id="${chip.id}"]`, els.chips);
-        chipChanged(root);
-        // On to the number this choice belongs to.
-        const next = $(`[data-f="${field === 'hiUnit' ? 'hi' : 'lo'}"]`, root);
-        next.focus();
-        next.select();
+        chipChanged($(`.qchip[data-id="${chip.id}"]`, els.chips));
+        focusChip(chip); // on to the first field of the form: the number, date or text
+        if (field === 'unit') $(`.qchip[data-id="${chip.id}"] [data-f="n"]`, els.chips)?.focus();
+        if (field === 'hiUnit') $(`.qchip[data-id="${chip.id}"] [data-f="hi"]`, els.chips)?.focus();
       },
-    })), { minWidth: field === 'op' ? 130 : 84 });
+    })), { minWidth: field === 'op' ? 140 : 84 });
+  }
+
+  /** Places, indexed locations and a folder picker for the Folder form. */
+  function openPlacesMenu(chip, button) {
+    const choose = path => () => {
+      chip.path = path;
+      renderChips();
+      chipChanged($(`.qchip[data-id="${chip.id}"]`, els.chips));
+      focusChip(chip);
+    };
+    const same = path => chip.path.trim().toLowerCase().replace(/\\$/, '') === path.toLowerCase().replace(/\\$/, '');
+    const items = [];
+    if (state.places.length) items.push({ head: 'Places' });
+    for (const place of state.places) items.push({ label: place.label, checked: same(place.path), run: choose(place.path) });
+    items.push({ head: 'Indexed locations' });
+    for (const root of state.settings.roots) items.push({ label: root, checked: same(root), run: choose(root) });
+    items.push({ sep: true }, { label: 'Choose folder…', run: () => host.post({ type: 'pickFolder', purpose: `chip:${chip.id}` }) });
+    menu.open(button, items, { align: 'right' });
   }
 
   els.chips.addEventListener('click', e => {
@@ -893,8 +1030,8 @@
     ['*.log', 'Wildcards'],
     ['type:.pdf', 'By suffix — or ext:pdf'],
     ['size:1mb-10mb', 'By size, or size:>100mb'],
-    ['dm:7d', 'Changed lately — also today, 2026-03'],
-    ['in:C:\\Projects', 'Only inside a folder'],
+    ['date:7d', 'Changed lately — also today, 2026-03'],
+    ['in:C:\\Projects', 'Only inside a folder (also source:)'],
     ['src\\ main', 'A backslash matches the path'],
     ['regex:^IMG_\\d+', 'Regular expressions'],
   ];
@@ -1319,6 +1456,7 @@
             <div class="card">
               ${field('Show hidden items', 'Hidden files and folders, and everything inside hidden folders such as AppData.', toggle('showHidden'))}
               ${field('Show system files', 'Protected operating system files.', toggle('showSystem'))}
+              ${field('Search the folder you are in', 'Opened from a File Explorer window, EasySearch searches that folder. From anywhere else it searches everywhere.', toggle('scopeToExplorer'))}
               ${field('Sort results by', 'Used whenever the palette opens.', `<select class="text-input" id="default-sort">${SORTS.map(o =>
                 `<option value="${o.id}"${o.id === s.defaultSort ? ' selected' : ''}>${o.label}</option>`).join('')}</select>`)}
             </div>
@@ -1576,6 +1714,14 @@
   // ---- host messages ---------------------------------------------------------------
 
   function onFolderPicked({ purpose, path }) {
+    if (purpose.startsWith('chip:')) {
+      const chip = chipById(purpose.slice(5));
+      if (!chip) return;
+      chip.path = path;
+      renderChips();
+      chipChanged($(`.qchip[data-id="${chip.id}"]`, els.chips));
+      return focusChip(chip);
+    }
     if (purpose === 'scope') {
       state.scope = { label: folderName(path), path };
       renderFilters();
@@ -1586,6 +1732,27 @@
       state.settings.roots.push(path);
       saveSettings();
       renderSettings();
+    }
+  }
+
+  /**
+   * The palette was opened from a File Explorer window: search that folder. A folder chosen this
+   * way is replaced the next time it is opened from somewhere else, but one picked by hand stays.
+   */
+  function onExplorerFolder(path) {
+    if (path) {
+      if (state.scope && !state.scope.auto && state.scope.path.toLowerCase() === path.toLowerCase()) return;
+      state.scope = { label: folderName(path), path, auto: true };
+      renderFilters();
+      if (state.view === 'main') {
+        toast(`Searching in ${state.scope.label}`);
+        newSearch();
+      }
+    } else if (state.scope?.auto) {
+      state.scope = null;
+      renderFilters();
+      if (isSearching()) newSearch();
+      else showHome();
     }
   }
 
@@ -1627,6 +1794,7 @@
         break;
       case 'theme': document.documentElement.dataset.theme = message.theme; break;
       case 'status': onStatus(message); break;
+      case 'explorerFolder': onExplorerFolder(message.path); break;
       case 'results': onResults(message); break;
       case 'preview': onPreviewText(message); break;
       case 'folderPicked': onFolderPicked(message); break;
