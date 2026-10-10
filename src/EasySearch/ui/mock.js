@@ -90,12 +90,14 @@ window.createMockHost = () => {
     if (error) return { error, items: [], total: 0, elapsedMs: 0 };
 
     const kindExts = KINDS[request.kind] ? KINDS[request.kind].split(' ') : null;
+    const customExts = (request.extensions || '').toLowerCase().split(/[\s,;|]+/).map(e => e.replace(/^[*.]+/, '')).filter(Boolean);
     const scope = request.scope ? request.scope.toLowerCase().replace(/\\$/, '') : null;
     const matches = files.filter(file => {
       if (file.hidden && !request.showHidden) return false;
       if (request.kind === 'folder' && !file.isDir) return false;
       if (kindExts && (file.isDir || !kindExts.includes(ext(file.name)))) return false;
       if (extFilter && (file.isDir || !extFilter.includes(ext(file.name)))) return false;
+      if (customExts.length && (file.isDir || !customExts.includes(ext(file.name)))) return false;
       if (request.sizeMin != null && (file.isDir || file.size < request.sizeMin)) return false;
       if (request.sizeMax != null && (file.isDir || file.size > request.sizeMax)) return false;
       if (request.modifiedAfter != null && file.modified < request.modifiedAfter) return false;

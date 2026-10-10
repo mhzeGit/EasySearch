@@ -55,7 +55,7 @@
   // ---- vocabulary ------------------------------------------------------------------
 
   const KINDS = [
-    { id: 'all', label: 'All' },
+    { id: 'all', label: 'All types' },
     { id: 'folder', label: 'Folders' },
     { id: 'document', label: 'Documents' },
     { id: 'image', label: 'Images' },
@@ -231,7 +231,8 @@
     settingsTab: 'general',
     recording: false,
     query: '',
-    kind: 'all',
+    kind: 'all', // a KINDS id, or 'custom' for the suffixes typed into state.ext
+    ext: '',
     size: null,
     modified: null,
     scope: null, // { label, path }
@@ -250,7 +251,7 @@
   };
 
   const els = {
-    window: $('#window'), query: $('#query'), count: $('#count'), kinds: $('#kinds'), list: $('#list'),
+    window: $('#window'), query: $('#query'), count: $('#count'), ext: $('#ext-input'), list: $('#list'),
     preview: $('#preview'), status: $('#status'), hints: $('#hints'), settings: $('#settings'),
     menu: $('#menu'), toast: $('#toast'),
   };
@@ -275,7 +276,11 @@
 
   // ---- searching -------------------------------------------------------------------
 
-  const hasFilters = () => state.kind !== 'all' || state.size || state.modified || state.scope;
+  /** The suffixes typed for the custom type: "pdf, .DOCX *.md" -> ['pdf', 'docx', 'md']. */
+  const customExts = () => state.kind !== 'custom' ? [] :
+    state.ext.split(/[\s,;|]+/).map(e => e.replace(/^[*.]+/, '').toLowerCase()).filter(Boolean);
+  const kindActive = () => state.kind === 'custom' ? customExts().length > 0 : state.kind !== 'all';
+  const hasFilters = () => kindActive() || state.size || state.modified || state.scope;
   const isSearching = () => state.query.trim().length > 0 || hasFilters();
 
   function runSearch({ keepSelection = false } = {}) {
@@ -296,7 +301,8 @@
       type: 'search',
       id: ++state.searchId,
       query: state.query.trim(),
-      kind: state.kind,
+      kind: state.kind === 'custom' ? 'all' : state.kind,
+      extensions: customExts().join(' '),
       sizeMin: size.min ?? null,
       sizeMax: size.max ?? null,
       modifiedAfter: date.after ? date.after() : null,
@@ -575,14 +581,16 @@
   // ---- filters ---------------------------------------------------------------------
 
   function renderFilters() {
-    els.kinds.innerHTML = KINDS.map(k =>
-      `<button class="kind${k.id === state.kind ? ' on' : ''}" data-kind="${k.id}" role="tab">${k.label}</button>`).join('');
-
     const chip = (id, label, active) => {
       const el = $(id);
       el.classList.toggle('on', !!active);
       el.innerHTML = `<span>${esc(label)}</span>${icon('chevron', 13)}`;
     };
+    const custom = state.kind === 'custom';
+    const exts = customExts();
+    chip('#chip-kind', custom ? (exts.length ? exts.map(e => '.' + e).join(' ') : 'Custom') : KINDS.find(k => k.id === state.kind).label, kindActive());
+    els.ext.hidden = !custom;
+    if (els.ext.value !== state.ext) els.ext.value = state.ext;
     chip('#chip-size', state.size ? SIZES.find(s => s.id === state.size).label : 'Size', state.size);
     chip('#chip-modified', state.modified ? DATES.find(d => d.id === state.modified).label : 'Modified', state.modified);
     chip('#chip-scope', state.scope ? state.scope.label : 'Everywhere', state.scope);
@@ -599,6 +607,7 @@
 
   function resetFilters() {
     state.kind = 'all';
+    state.ext = '';
     state.size = state.modified = state.scope = null;
     renderFilters();
     newSearch();
@@ -612,6 +621,22 @@
   }
 
   const folderName = path => path.replace(/\\+$/, '').split('\\').pop() || path;
+
+  function openKindMenu() {
+    const items = KINDS.map(k => ({ label: k.label, checked: k.id === state.kind, run: () => setKind(k.id) }));
+    const exts = customExts();
+    items.push({ sep: true }, {
+      label: 'Custom…',
+      sub: exts.length ? exts.map(e => '.' + e).join(' ') : 'Type a suffix',
+      checked: state.kind === 'custom',
+      run: () => {
+        setKind('custom');
+        els.ext.focus();
+        els.ext.select();
+      },
+    });
+    menu.open($('#chip-kind'), items);
+  }
 
   function openSizeMenu() {
     menu.open($('#chip-size'), SIZES.map(s => ({
@@ -1011,11 +1036,13 @@
     newSearch();
   });
 
-  els.kinds.addEventListener('click', e => {
-    const kind = e.target.closest('[data-kind]');
-    if (kind) setKind(kind.dataset.kind);
+  els.ext.addEventListener('input', () => {
+    state.ext = els.ext.value;
+    renderFilters();
+    newSearch();
   });
 
+  $('#chip-kind').addEventListener('click', openKindMenu);
   $('#chip-size').addEventListener('click', openSizeMenu);
   $('#chip-modified').addEventListener('click', openModifiedMenu);
   $('#chip-scope').addEventListener('click', openScopeMenu);
@@ -1062,7 +1089,7 @@
       menu.close();
       if (reopen) { e.preventDefault(); e.stopPropagation(); menu.swallow = true; }
     }
-    if (state.view === 'main' && e.target !== els.query && !e.target.closest('.preview')) e.preventDefault();
+    if (state.view === 'main' && e.target !== els.query && e.target !== els.ext && !e.target.closest('.preview')) e.preventDefault();
 
     // Empty parts of the top bar act as a title bar: dragging them moves the window.
     if (e.button === 0 && e.target.closest('.searchbar, .set-head') && !e.target.closest('input, button')) host.post({ type: 'drag' });
@@ -1086,6 +1113,12 @@
       return;
     }
 
+    // In the custom suffix box, typing stays there; Enter, Esc or Tab hands focus back to the search box.
+    if (document.activeElement === els.ext) {
+      if (['Enter', 'Escape', 'Tab'].includes(e.key)) { e.preventDefault(); els.query.focus(); return; }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    }
+
     // Typing always goes to the search box, even after clicking around in the preview.
     if (document.activeElement !== els.query && !ctrl && !e.altKey && e.key.length === 1) els.query.focus();
 
@@ -1098,8 +1131,10 @@
       case 'End': if (!ctrl) return; select(state.items.length - 1); break;
       case 'Enter': if (ctrl) act('reveal'); else activate(); break;
       case 'Tab': {
-        const at = KINDS.findIndex(k => k.id === state.kind);
-        setKind(KINDS[(at + (e.shiftKey ? -1 : 1) + KINDS.length) % KINDS.length].id);
+        // Cycles the preset types; the custom suffix sits just outside the ring.
+        const step = e.shiftKey ? -1 : 1;
+        const at = state.kind === 'custom' ? (step > 0 ? -1 : 0) : KINDS.findIndex(k => k.id === state.kind);
+        setKind(KINDS[(at + step + KINDS.length) % KINDS.length].id);
         break;
       }
       case 'Escape':

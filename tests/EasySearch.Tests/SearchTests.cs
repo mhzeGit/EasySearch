@@ -82,6 +82,19 @@ public sealed class SearchTests : IDisposable
     }
 
     [Fact]
+    public void Custom_extension_filter()
+    {
+        // The custom type box: dots, wildcards, case and separators are all forgiven.
+        var pdfAndDocx = Names("ext:pdf;docx");
+        Assert.Equal(pdfAndDocx, Names("", r => r.Extensions = ".PDF docx"));
+        Assert.Equal(pdfAndDocx, Names("", r => r.Extensions = "*.pdf, .docx"));
+        Assert.Equal(["README.md"], Names("", r => { r.Kind = "document"; r.Extensions = "md"; }));
+        Assert.Empty(Names("", r => { r.Kind = "image"; r.Extensions = "pdf"; }));
+        Assert.Equal(["Annual Report 2025.pdf"], Names("annual", r => r.Extensions = "pdf"));
+        Assert.Equal(Names("type:file"), Names("type:file", r => r.Extensions = " . "));
+    }
+
+    [Fact]
     public void Size_and_date_filters()
     {
         Assert.Equal(["Annual Report 2025.pdf", "IMG_0001.JPG", "IMG_0002.jpg"], Names("size:>1mb"));

@@ -19,7 +19,11 @@
     </header>
 
     <nav class="filters">
-      <div class="kinds" id="kinds" role="tablist"></div>
+      <div class="kinds" id="kinds">
+        <button class="chip" id="chip-kind" aria-haspopup="menu" title="File type"></button>
+        <input id="ext-input" class="ext-input" type="text" placeholder="pdf, docx, …" hidden
+               autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Custom file suffix">
+      </div>
       <div class="filter-menus">
         <button class="chip" id="chip-size"></button>
         <button class="chip" id="chip-modified"></button>

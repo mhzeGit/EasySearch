@@ -9,6 +9,11 @@ public sealed class SearchRequest
     public string Query { get; set; } = "";
     /// <summary>all, folder, file, or one of <see cref="FileKinds.Names"/>.</summary>
     public string Kind { get; set; } = "all";
+    /// <summary>
+    /// Exact file suffixes to require on top of <see cref="Kind"/> (the custom type filter): "pdf",
+    /// ".pdf .docx" or "pdf;docx". A leading dot or <c>*.</c> is ignored.
+    /// </summary>
+    public string Extensions { get; set; } = "";
     public long? SizeMin { get; set; }
     public long? SizeMax { get; set; }
     /// <summary>Unix milliseconds.</summary>
@@ -81,6 +86,8 @@ static class QueryParser
         };
 
         ApplyKind(q, request.Kind, negate: false);
+        var suffixes = ParseExtensions(request.Extensions);
+        if (suffixes.Count > 0) q.RequiredExtensions.Add(suffixes);
         if (request.SizeMin is { } min) { q.HasSize = true; q.SizeMin = Math.Max(q.SizeMin, min); }
         if (request.SizeMax is { } max) { q.HasSize = true; q.SizeMax = Math.Min(q.SizeMax, max); }
         if (request.ModifiedAfter is { } after) { q.HasDate = true; q.ModifiedMin = PathUtil.FromUnixMs(after); }
@@ -136,9 +143,9 @@ static class QueryParser
             switch (key)
             {
                 case "ext":
-                    var extensions = SplitList(value).Select(e => e.TrimStart('.')).Where(e => e.Length > 0);
+                    var extensions = ParseExtensions(value);
                     if (negate) (q.ForbiddenExtensions ??= NewSet()).UnionWith(extensions);
-                    else q.RequiredExtensions.Add(new HashSet<string>(extensions, StringComparer.OrdinalIgnoreCase));
+                    else q.RequiredExtensions.Add(extensions);
                     return;
 
                 case "type" or "kind":
@@ -244,6 +251,18 @@ static class QueryParser
     }
 
     static HashSet<string> NewSet() => new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>"pdf", ".pdf", "*.pdf", or a list separated by space, comma, semicolon or bar.</summary>
+    static HashSet<string> ParseExtensions(string value)
+    {
+        var set = NewSet();
+        foreach (var part in value.Split([';', ',', '|', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var extension = part.TrimStart('*', '.');
+            if (extension.Length > 0) set.Add(extension);
+        }
+        return set;
+    }
 
     static string[] SplitList(string value) =>
         value.Split([';', ',', '|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
