@@ -59,6 +59,7 @@ sealed class CompiledQuery
     public long SizeMin, SizeMax = long.MaxValue;
     public long ModifiedMin = long.MinValue, ModifiedMax = long.MaxValue; // [min, max) in UTC ticks
     public string? Scope;
+    public string? Inside;
     public bool IgnoreCase = true;
     public bool ShowHidden, ShowSystem;
     /// <summary>The term whose match position drives relevance ranking, or -1.</summary>
@@ -170,9 +171,14 @@ static class QueryParser
                     q.HasDate = true;
                     return;
 
-                case "in" or "source" or "location" or "inside" or "where" or "under" or "parent":
+                case "in" or "source" or "location" or "where" or "under" or "parent":
                     if (negate) throw NotUnsupported(key);
                     if (value.Length > 0) q.Scope = value;
+                    return;
+
+                case "inside" or "foldername" or "folder-name":
+                    if (negate) throw NotUnsupported(key);
+                    if (value.Length > 0) q.Inside = value;
                     return;
 
                 case "path":

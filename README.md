@@ -65,15 +65,17 @@ dotnet publish src/EasySearch -c Release -r win-x64 --self-contained false -o pu
 | `type:image`, `type:3d`, `type:blender`, `type:photoshop` | by kind or by the tool's name: `folder`, `file`, `image`, `video`, `audio`, `document`, `code`, `archive`, `app`, `3d`, `cad`, `spreadsheet`, `font`, `blender`, `word`, `python`, … (spaces and dashes are ignored: `3D models`) |
 | `size:>100mb`, `size:1mb..1gb`, `size:1mb-10mb`, `size:empty` | by size (`tiny` … `gigantic` also work; `size:1-10mb` borrows the unit) |
 | `date:today`, `date:7d`, `date:2026-03`, `date:>2026-01-01`, `date:2026-01..2026-03` | by date modified (`modified:` and `dm:` work too) |
-| `in:C:\Projects` | only inside a folder (`source:`, `location:`, `inside:` work too) |
+| `in:C:\Projects` | only inside this exact folder (`source:` and `location:` work too) |
+| `inside:Photos` | only in a folder named `Photos` (matches every folder with that name) |
 | `src\ main`, `path:backup` | a backslash (or `path:`) matches against the full path |
 | `regex:^IMG_\d+` | regular expressions |
 
-Typing `size:`, `type:`, `date:` or `in:` in the box turns it into a small form under the box, so you
+Typing `size:`, `type:`, `date:`, `in:` or `inside:` in the box turns it into a small form under the box, so you
 can see what to fill in: size takes *at least / at most / between / exactly*, a number and a
 **B / KB / MB / GB / TB** drop-down; type takes names and suffixes with suggestions as you type
 (`blender`, `3D`, `pdf`, `.fbx` …); date takes *in the last N days… / today / this week / on /
-before / after / between* with a calendar; folder takes a path or a pick from your places.
+before / after / between* with a calendar; Folder chooses an exact directory or a saved place,
+while Inside matches a folder name anywhere in the indexed paths.
 Backspace on an empty box removes the last form, and the forms turn back into plain text
 as soon as you type `OR`, `NOT` or parentheses.
 

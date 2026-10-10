@@ -95,6 +95,15 @@ public sealed class SearchTests : IDisposable
     }
 
     [Fact]
+    public void Inside_matches_any_parent_folder_with_the_name()
+    {
+        Assert.Equal(new[] { "Program.cs", "README.md" }, Names("inside:app"));
+        Assert.Equal(new[] { "notes.txt", "Annual Report 2025.pdf", "annual report draft.docx" }.OrderBy(n => n),
+            Names("inside:docs").OrderBy(n => n));
+        Assert.Equal(["Program.cs", "README.md"], Names("in:" + Path.Combine(_root, "src", "app")));
+    }
+
+    [Fact]
     public void Extension_and_type_filters()
     {
         Assert.Equal(["holiday.png", "IMG_0001.JPG", "IMG_0002.jpg"], Names("type:image"));
@@ -257,7 +266,7 @@ public sealed class SearchTests : IDisposable
     [Fact]
     public void Friendly_operator_names()
     {
-        // date: is the plain-English name for dm:; location, source and inside: for in:.
+        // date: is the plain-English name for dm:; location and source are aliases for in:.
         var today = Names("dm:today type:file");
         Assert.Equal(["notes.txt"], today);
         foreach (var name in new[] { "date", "modified", "changed", "updated", "datemodified" })
@@ -265,8 +274,9 @@ public sealed class SearchTests : IDisposable
 
         var src = Path.Combine(_root, "src");
         var inside = Names($"in:\"{src}\"");
-        foreach (var name in new[] { "source", "location", "inside", "where", "under" })
+        foreach (var name in new[] { "source", "location", "where", "under" })
             Assert.Equal(inside, Names($"{name}:\"{src}\""));
+        Assert.Equal(["Program.cs", "README.md"], Names("inside:app"));
 
         // They also join up with OR, like any other filter.
         Assert.Equal(Names("date:today OR size:empty").OrderBy(n => n), Names("dm:today").Union(Names("size:empty")).OrderBy(n => n));

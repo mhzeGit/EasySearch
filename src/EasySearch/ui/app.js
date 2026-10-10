@@ -271,7 +271,7 @@
 
   function renderQueryHighlight() {
     const value = els.query.value;
-    const syntax = /(^|\s)(AND|OR|NOT)(?=\s|$)|\b(type|ext|kind|size|date|dm|modified|changed|updated|datemodified|in|source|location|inside|where|under|parent|path|regex|folders?|files?):("[^"]*"|\S*)/gi;
+    const syntax = /(^|\s)(AND|OR|NOT)(?=\s|$)|\b(type|ext|kind|size|date|dm|modified|changed|updated|datemodified|in|source|location|inside|foldername|where|under|parent|path|regex|folders?|files?):("[^"]*"|\S*)/gi;
     let html = '', at = 0;
     for (const match of value.matchAll(syntax)) {
       const index = match.index ?? 0;
@@ -437,7 +437,8 @@
   const FILTER_FORM = {
     size: 'size', type: 'type',
     date: 'date', dm: 'date', modified: 'date', changed: 'date', updated: 'date', datemodified: 'date',
-    in: 'place', source: 'place', location: 'place', inside: 'place', where: 'place',
+    in: 'place', source: 'place', location: 'place', where: 'place',
+    foldername: 'foldername', inside: 'foldername',
   };
   const FILTER_PATTERN = new RegExp(`(^|\\s)(${Object.keys(FILTER_FORM).join('|')}):("[^"]*"|\\S*)`, 'gi');
 
@@ -534,6 +535,8 @@
       }
       case 'place':
         return newPlaceChip(value);
+      case 'foldername':
+        return { kind: 'foldername', text: value };
       default:
         return newTypeChip(value.split(/[;|,]+/).filter(Boolean).join(', '));
     }
@@ -582,6 +585,10 @@
       const path = chip.path.trim().replace(/^"|"$/g, '');
       return path ? (/\s/.test(path) ? `in:"${path}"` : `in:${path}`) : null;
     }
+    if (chip.kind === 'foldername') {
+      const name = chip.text.trim().replace(/^"|"$/g, '');
+      return name ? (/\s/.test(name) ? `inside:"${name}"` : `inside:${name}`) : null;
+    }
     if (chip.kind === 'date') {
       const iso = d => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? d : '');
       switch (chip.op) {
@@ -618,7 +625,7 @@
 
   // ---- searching -------------------------------------------------------------------
 
-  const hasFilters = () => /\b(?:type|ext|kind|size|date|dm|modified|changed|updated|in|source|location):\S+/i.test(state.query);
+  const hasFilters = () => /\b(?:type|ext|kind|size|date|dm|modified|changed|updated|in|source|location|inside|foldername):\S+/i.test(state.query);
   const hasQuery = () => state.query.trim().length > 0;
 
   function runSearch({ keepSelection = false } = {}) {
@@ -943,6 +950,7 @@
       { label: 'Size', sub: '›', run: () => openFilterSubmenu('size') },
       { label: 'Date modified', sub: '›', run: () => openFilterSubmenu('date') },
       { label: 'Folder', sub: '›', run: () => openFilterSubmenu('place') },
+      { label: 'Inside', sub: 'folder name', run: () => insertFilterToken('inside:') },
     ]);
   }
 
@@ -964,8 +972,8 @@
       if (state.settings.roots.length) items.push({ head: 'Indexed locations' });
       for (const root of state.settings.roots) items.push({ label: root, run: () => setFilter('place', { path: root }) });
       items.push({ sep: true },
-        { label: 'Choose folder…', run: () => host.post({ type: 'pickFolder', purpose: 'addFilterPlace' }) },
-        { label: 'Type a path…', sub: 'C:\\Projects', run: () => insertFilterToken('in:') });
+        { label: 'Choose exact folder…', run: () => host.post({ type: 'pickFolder', purpose: 'addFilterPlace' }) },
+        { label: 'Type folder path…', sub: 'C:\\Projects', run: () => insertFilterToken('in:') });
     }
     const title = ({ type: 'File type', size: 'Size', date: 'Date modified', place: 'Folder' })[kind];
     items.unshift({ label: '‹ All filters', run: openAddFilters }, { head: title });

@@ -142,7 +142,7 @@ window.createMockHost = () => {
   function search(request) {
     const started = performance.now();
     const terms = [];
-    let extFilter = null, error = null, typeFilter = null, sizeFilter = null, dateFilter = null, folderFilter = null;
+    let extFilter = null, error = null, typeFilter = null, sizeFilter = null, dateFilter = null, folderFilter = null, folderNameFilter = null;
     // The mock only understands the symbols, so spell the capitalised logic words that way.
     const spelled = request.query.replace(/\s+(OR|or|\|\|)\s+/g, '|').replace(/\b(AND|and|&&)\s+/g, '')
       .replace(/\bNOT\s+/g, '!').replace(/[()]/g, '');
@@ -155,8 +155,10 @@ window.createMockHost = () => {
         const range = dateRange(text.slice(text.indexOf(':') + 1));
         if (range.some(Number.isNaN)) error = `Can't read date "${text.slice(text.indexOf(':') + 1)}". Try date:today, date:7d or date:>2026-01-01`;
         else dateFilter = range;
-      } else if (/^(in|source|location|inside|where|under|parent):/.test(text)) {
+      } else if (/^(in|source|location|where|under|parent):/.test(text)) {
         folderFilter = text.slice(text.indexOf(':') + 1).replace(/\\$/, '');
+      } else if (/^(inside|foldername|folder-name):/.test(text)) {
+        folderNameFilter = text.slice(text.indexOf(':') + 1);
       } else if (text.startsWith('size:')) {
         const range = sizeRange(text.slice(5));
         if (range.some(Number.isNaN)) error = `Can't read size "${text.slice(5)}". Try size:>10mb or size:1mb..1gb`;
@@ -178,6 +180,7 @@ window.createMockHost = () => {
       if (sizeFilter && (file.isDir || file.size < sizeFilter[0] || file.size > sizeFilter[1])) return false;
       if (dateFilter && (file.modified < dateFilter[0] || file.modified >= dateFilter[1])) return false;
       if (folderFilter && !`${file.dir}\\`.toLowerCase().startsWith(`${folderFilter}\\`)) return false;
+      if (folderNameFilter && !file.dir.split('\\').some(part => part.toLowerCase() === folderNameFilter.toLowerCase())) return false;
       if (customExts.length && (file.isDir || !customExts.includes(ext(file.name)))) return false;
       if (request.sizeMin != null && (file.isDir || file.size < request.sizeMin)) return false;
       if (request.sizeMax != null && (file.isDir || file.size > request.sizeMax)) return false;

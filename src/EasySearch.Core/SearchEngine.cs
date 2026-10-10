@@ -313,6 +313,7 @@ public static class SearchEngine
         readonly Term[] _terms = [.. query.Terms];
         readonly HashSet<string>[] _required = [.. query.RequiredExtensions];
         readonly StringComparison _comparison = query.Comparison;
+        readonly string? _inside = query.Inside;
         readonly long _now = DateTime.UtcNow.Ticks;
         readonly EntryFlags _skip = EntryFlags.Deleted
             | (query.ShowHidden ? 0 : EntryFlags.Hidden | EntryFlags.HiddenTree)
@@ -342,6 +343,7 @@ public static class SearchEngine
             }
 
             var name = snapshot.Name(i);
+            if (_inside is { Length: > 0 } inside && !HasParentFolderNamed(snapshot, i, inside)) return false;
             if (_required.Length > 0 || query.ForbiddenExtensions is not null)
             {
                 if (isDirectory)
@@ -396,6 +398,17 @@ public static class SearchEngine
 
             if (score) relevance = Score(i, name, flags, primaryPosition, primaryLength);
             return true;
+        }
+
+        bool HasParentFolderNamed(IndexSnapshot snapshot, int index, string folderName)
+        {
+            int parent = snapshot.Parent[index];
+            while (parent >= 0 && snapshot.Parent[parent] >= 0)
+            {
+                if (snapshot.Name(parent).Equals(folderName, _comparison)) return true;
+                parent = snapshot.Parent[parent];
+            }
+            return false;
         }
 
         /// <summary>Higher is better: exact and prefix matches first, then word starts, short names, shallow and recent items.</summary>
