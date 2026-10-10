@@ -70,7 +70,7 @@ svg.i { flex: none; display: block; }
 .window {
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) 38px;
+  grid-template-rows: auto 44px minmax(0, 1fr) 38px;
   width: 100vw;
   height: 100vh;
   background: var(--surface);
@@ -89,6 +89,15 @@ svg.i { flex: none; display: block; }
   gap: 10px;
   height: 62px;
   padding: 0 14px 0 20px;
+}
+
+.filterbar {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 14px 0 20px;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--text) 2%, transparent);
 }
 
 .add-filter-btn {

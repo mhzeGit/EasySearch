@@ -284,13 +284,9 @@
 
   function insertFilterToken(token) {
     const value = els.query.value;
-    const start = els.query.selectionStart ?? value.length;
-    const end = els.query.selectionEnd ?? start;
-    const left = value.slice(0, start), right = value.slice(end);
-    const before = left && !/\s$/.test(left) ? ' ' : '';
-    const after = right && !/^\s/.test(right) ? ' ' : '';
-    els.query.value = left + before + token + after + right;
-    const caret = left.length + before.length + token.length;
+    const left = value.trimEnd();
+    els.query.value = left + (left ? ' AND ' : '') + token;
+    const caret = els.query.value.length;
     els.query.focus();
     els.query.setSelectionRange(caret, caret);
     renderQueryHighlight();
