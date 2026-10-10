@@ -309,6 +309,10 @@
     return iconCache.get(key);
   }
 
+  /** Windows thumbnail when available, with the normal file icon as the host fallback. */
+  const rowImageUrl = item =>
+    `https://images.easysearch.example/thumb?s=64&d=${item.isDir ? 1 : 0}&p=${encodeURIComponent(pathOf(item))}`;
+
   const thumbUrl = item =>
     `https://images.easysearch.example/thumb?s=512&d=${item.isDir ? 1 : 0}&p=${encodeURIComponent(pathOf(item))}&m=${item.modified}`;
 
@@ -660,7 +664,7 @@
     const target = item.command ? (item.path ? { name: item.path, dir: '', isDir: true } : null) : item;
     const kind = item.command ? item.kind : kindOf(item);
     const glyph = icon(item.command ? item.icon : kindIcon(kind), size);
-    const url = target ? iconUrl(target, 64) : null;
+    const url = target ? rowImageUrl(target) : null;
     if (!url) return `<span class="row-icon k-${kind}">${glyph}</span>`;
     return `<span class="row-icon pending k-${kind}">${glyph}<img src="${esc(url)}" alt="" loading="lazy" onload="this.parentNode.classList.add('has-img')" onerror="this.parentNode.classList.remove('pending'); this.remove()"></span>`;
   }
