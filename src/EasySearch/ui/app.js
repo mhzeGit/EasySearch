@@ -288,9 +288,10 @@
     const after = value.slice(at);
     if (after) html += `<span aria-hidden="true">${esc(after)}</span>`;
     queryHighlight.innerHTML = html;
-    const hasFolder = queryHighlight.querySelector('.query-folder-filter');
-    if (hasFolder) {
-      // Keep the compact folder summary visible even though the real query still contains its full path.
+    const hasFilterChip = queryHighlight.querySelector('.query-filter-chip');
+    if (hasFilterChip) {
+      // The input contains the full token (or directory path), while the overlay renders a shorter chip.
+      // Hide the input caret because its character position no longer matches the chip's visual position.
       queryHighlight.scrollLeft = 0;
       els.query.scrollLeft = 0;
       els.query.style.caretColor = 'transparent';
