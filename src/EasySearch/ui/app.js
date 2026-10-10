@@ -274,13 +274,29 @@
     let html = '', at = 0;
     for (const match of value.matchAll(syntax)) {
       const index = match.index ?? 0;
-      html += esc(value.slice(at, index));
-      if (match[2]) html += `${esc(match[1])}<span class="logic-${match[2].toLowerCase()}">${esc(match[2])}</span>`;
-      else html += `<span class="query-filter">${esc(match[0])}</span>`;
+      const before = value.slice(at, index);
+      if (before) html += `<span aria-hidden="true">${esc(before)}</span>`;
+      if (match[2]) html += `<span aria-hidden="true">${esc(match[1])}<span class="logic-${match[2].toLowerCase()}">${esc(match[2])}</span></span>`;
+      else if (/^(in|source|location|inside|where|under|parent|path)$/i.test(match[3])) {
+        const path = match[4].replace(/^"|"$/g, '');
+        const label = path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).pop() || path;
+        html += `<button type="button" class="query-folder-filter" data-folder-path="${esc(path)}" title="Open ${esc(path)} in File Explorer" aria-label="Open ${esc(path)} in File Explorer">${icon('folder', 14)}<span aria-hidden="true">${esc(label)}</span></button>`;
+      } else html += `<span class="query-filter" aria-hidden="true">${esc(match[0])}</span>`;
       at = index + match[0].length;
     }
-    queryHighlight.innerHTML = html + esc(value.slice(at));
-    queryHighlight.scrollLeft = els.query.scrollLeft;
+    const after = value.slice(at);
+    if (after) html += `<span aria-hidden="true">${esc(after)}</span>`;
+    queryHighlight.innerHTML = html;
+    const hasFolder = queryHighlight.querySelector('.query-folder-filter');
+    if (hasFolder) {
+      // Keep the compact folder summary visible even though the real query still contains its full path.
+      queryHighlight.scrollLeft = 0;
+      els.query.scrollLeft = 0;
+      els.query.style.caretColor = 'transparent';
+    } else {
+      queryHighlight.scrollLeft = els.query.scrollLeft;
+      els.query.style.caretColor = '';
+    }
   }
 
   function insertFilterToken(token) {
@@ -1334,6 +1350,13 @@
     if (e.button === 0 && e.target.closest('.searchbar, .set-head') && !e.target.closest('input, button')) host.post({ type: 'drag' });
   }, true);
   document.addEventListener('click', e => {
+    const folder = e.target.closest('.query-folder-filter');
+    if (folder) {
+      e.preventDefault();
+      e.stopPropagation();
+      host.post({ type: 'action', action: 'open', path: folder.dataset.folderPath });
+      return;
+    }
     if (menu.swallow) { menu.swallow = false; e.preventDefault(); e.stopPropagation(); }
   }, true);
   document.addEventListener('contextmenu', e => e.preventDefault());
