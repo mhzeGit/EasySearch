@@ -16,9 +16,10 @@ Press **Win+Space** anywhere, type a few letters, hit Enter.
   changed — including whatever changed while the app was closed.
 - **Sits quietly in the background.** It waits in the notification area using next to no CPU and
   opens in well under a tenth of a second.
-- **Filters.** Type (a drop-down of folders, documents, images, video, audio, code, archives, apps,
-  or *Custom…* for exact suffixes such as `pdf` or `.docx .md`), size, date modified, and "only
-  inside this folder" — as one-click chips or typed operators.
+- **Filters.** Type (folders, documents, images, video, audio, code, archives, apps, 3D models, or
+  *Custom…* for names and suffixes such as `blender` or `.fbx`), size, date modified, and "only inside
+  this folder". Pick one from a drop-down or type `type:`, `size:`, `date:` or `in:` — both give the
+  same small form in the search bar, which you can then adjust.
 - **Scope control.** Pick which drives and folders are indexed and which folders are left out
   (by name anywhere, like `node_modules`, or by full path). Hidden and system items are opt-in.
 - **Searches where you are.** Press the hotkey while a File Explorer window has focus and EasySearch
