@@ -108,12 +108,14 @@ public static class SearchEngine
                 if (cancel.IsCancellationRequested) { loop.Stop(); Flush(local); return local; }
                 if (driver is not null)
                 {
-                    ScanNames(snapshot, range.Item1, range.Item2, driver, query.Comparison, matcher, local, cancel);
+                    ScanNames(snapshot, range.Item1, range.Item2, driver, query.Comparison, matcher, local, cancel,
+                        onProgress is null ? null : () => Flush(local));
                 }
                 else for (int i = range.Item1; i < range.Item2; i++)
                 {
                     if ((i & 0x3FFF) == 0 && cancel.IsCancellationRequested) { loop.Stop(); break; }
                     if (matcher.IsMatch(i, local, out int score)) local.Add(new Hit(i, score));
+                    if ((i & 0x3FFF) == 0) Flush(local);
                 }
                 Flush(local);
                 return local;
@@ -205,13 +207,14 @@ public static class SearchEngine
     /// evaluates the entries it lands in.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    static void ScanNames(IndexSnapshot snapshot, int from, int to, string driver, StringComparison comparison, Matcher matcher, Local local, CancellationToken cancel)
+    static void ScanNames(IndexSnapshot snapshot, int from, int to, string driver, StringComparison comparison, Matcher matcher, Local local, CancellationToken cancel, Action? progress)
     {
         var names = snapshot.Names;
         var starts = snapshot.NameStart;
         int end = starts[to - 1] + snapshot.NameLength[to - 1];
         int entry = from;
 
+        int matchesSinceProgress = 0;
         while (entry < to)
         {
             if (cancel.IsCancellationRequested) return;
@@ -226,7 +229,14 @@ public static class SearchEngine
 
             // A match that runs past the end of the name straddles two entries: not a real match.
             if (found + driver.Length <= starts[e] + snapshot.NameLength[e] && matcher.IsMatch(e, local, out int score))
+            {
                 local.Add(new Hit(e, score));
+                if (++matchesSinceProgress >= 128)
+                {
+                    matchesSinceProgress = 0;
+                    progress?.Invoke();
+                }
+            }
             entry = e + 1;
         }
     }
