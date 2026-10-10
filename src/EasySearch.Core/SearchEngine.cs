@@ -60,6 +60,11 @@ public static class SearchEngine
         var snapshot = index.Snapshot();
         if (snapshot.Count == 0) return new SearchResult { ElapsedMs = timer.Elapsed.TotalMilliseconds };
 
+        // Resolve each folder name once per search, including partial names and misspellings.
+        var insideNames = branches.SelectMany(b => b.Inside)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(name => name, name => FolderNameMatcher.Resolve(snapshot, name), StringComparer.OrdinalIgnoreCase);
+
         var scopes = new Dictionary<string, bool[]>(StringComparer.OrdinalIgnoreCase);
         var scopeMasks = new bool[]?[branches.Count];
         for (int b = 0; b < branches.Count; b++)
@@ -89,7 +94,8 @@ public static class SearchEngine
         var ranking = new Ranking(snapshot, sort, descending);
         var worstFirst = Comparer<Hit>.Create((a, b) => ranking.Compare(b, a));
         var matcher = new Matcher(
-            [.. branches.Select((b, i) => new BranchMatcher(snapshot, b, scopeMasks[i], sort == SortKey.Relevance))]);
+            [.. branches.Select((b, i) => new BranchMatcher(snapshot, b, scopeMasks[i], sort == SortKey.Relevance,
+                [.. b.Inside.Select(inside => insideNames[inside])]))]);
 
         // With OR branches there is no single piece of text every match must contain.
         string? driver = branches.Count == 1 ? FindDriver(query) : null;
@@ -308,12 +314,12 @@ public static class SearchEngine
         }
     }
 
-    sealed class BranchMatcher(IndexSnapshot snapshot, CompiledQuery query, bool[]? scope, bool score)
+    sealed class BranchMatcher(IndexSnapshot snapshot, CompiledQuery query, bool[]? scope, bool score, string[][] resolvedInside)
     {
         readonly Term[] _terms = [.. query.Terms];
         readonly HashSet<string>[] _required = [.. query.RequiredExtensions];
         readonly StringComparison _comparison = query.Comparison;
-        readonly string[] _inside = [.. query.Inside];
+        readonly string[][] _inside = resolvedInside;
         readonly long _now = DateTime.UtcNow.Ticks;
         readonly EntryFlags _skip = EntryFlags.Deleted
             | (query.ShowHidden ? 0 : EntryFlags.Hidden | EntryFlags.HiddenTree)
@@ -344,7 +350,7 @@ public static class SearchEngine
 
             var name = snapshot.Name(i);
             foreach (var inside in _inside)
-                if (!HasParentFolderNamed(snapshot, i, inside)) return false;
+                if (!inside.Any(folder => HasParentFolderNamed(snapshot, i, folder))) return false;
             if (_required.Length > 0 || query.ForbiddenExtensions is not null)
             {
                 if (isDirectory)

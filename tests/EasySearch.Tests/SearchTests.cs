@@ -124,6 +124,22 @@ public sealed class SearchTests : IDisposable
     }
 
     [Fact]
+    public void Inside_accepts_partial_names_and_closest_spellings_without_fuzzy_paths()
+    {
+        Write(@"blahblahfamily\Unity Projects\matched.txt", 1, daysOld: 0);
+        Write(@"blahblahfamily\Unity Assets\asset.txt", 1, daysOld: 0);
+        Write(@"unit\unrelated.txt", 1, daysOld: 0);
+        var index = IndexBuilder.Build(Scope());
+
+        Assert.Equal(["asset.txt", "matched.txt"],
+            Names("inside:blahblahfamly inside:unity type:file", index: index));
+        Assert.Equal(["matched.txt"],
+            Names("inside:blahblahfamly in:\"Unity Projcts\" type:file", index: index));
+        Assert.Equal(["unrelated.txt"], Names("inside:unit type:file", index: index));
+        Assert.Empty(Names($"source:\"{Path.Combine(_root, "blahblahfamly")}\"", index: index));
+    }
+
+    [Fact]
     public void Extension_and_type_filters()
     {
         Assert.Equal(["holiday.png", "IMG_0001.JPG", "IMG_0002.jpg"], Names("type:image"));
