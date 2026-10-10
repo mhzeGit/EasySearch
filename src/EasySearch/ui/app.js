@@ -136,6 +136,7 @@
 
   const number = new Intl.NumberFormat('en-US');
   const longDate = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const KB = 1024;
 
   function formatSize(bytes) {
     if (bytes < KB) return `${bytes} B`;
@@ -1459,7 +1460,16 @@
       case 'theme': document.documentElement.dataset.theme = message.theme; break;
       case 'status': onStatus(message); break;
       case 'explorerFolder': onExplorerFolder(message.path); break;
-      case 'results': onResults(message); break;
+      case 'results':
+        try { onResults(message); }
+        catch (error) {
+          state.pending = false;
+          state.items = [];
+          state.error = error?.message || String(error);
+          renderList();
+          renderCount();
+        }
+        break;
       case 'preview': onPreviewText(message); break;
       case 'folderPicked': onFolderPicked(message); break;
       case 'toast': toast(message.text, message.error); break;
