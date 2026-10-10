@@ -1088,7 +1088,7 @@
     const s = state.status;
     els.status.classList.toggle('busy', s.indexing);
     const text = s.indexing
-      ? `Indexing… ${number.format(Math.max(s.scanned, s.items))} items`
+      ? `Indexing ${number.format(Math.max(s.scanned, s.items))}/${number.format(Math.max(s.scanned, s.items))} items`
       : `${number.format(s.items)} items indexed`;
     els.status.innerHTML = `<span class="dot"></span><span>${text}</span>`;
     if (state.view === 'settings' && state.settingsTab === 'index') {
