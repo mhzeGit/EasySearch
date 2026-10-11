@@ -793,6 +793,13 @@
         let row = existing.get(key);
         if (row) {
           existing.delete(key);
+          if (row.dataset.signature !== signature) {
+            row.querySelector('.row-name').innerHTML = highlight(item.name, terms);
+            row.querySelector('.row-path').textContent = item.dir;
+            row.querySelector('.row-meta').innerHTML = `<b>${formatDate(item.modified)}</b><span>${item.isDir ? 'Folder' : formatSize(item.size)}</span>`;
+            row.classList.toggle('dim', !!item.hidden);
+            row.dataset.signature = signature;
+          }
         } else {
           const holder = document.createElement('div');
           holder.innerHTML = `<div class="row${index === state.selected ? ' sel' : ''}${item.hidden ? ' dim' : ''}" data-i="${index}" data-key="${esc(key)}" data-signature="${esc(signature)}" role="option">
@@ -823,13 +830,6 @@
     renderHints();
   }
 
-          if (row.dataset.signature !== signature) {
-            row.querySelector('.row-name').innerHTML = highlight(item.name, terms);
-            row.querySelector('.row-path').textContent = item.dir;
-            row.querySelector('.row-meta').innerHTML = `<b>${formatDate(item.modified)}</b><span>${item.isDir ? 'Folder' : formatSize(item.size)}</span>`;
-            row.classList.toggle('dim', !!item.hidden);
-            row.dataset.signature = signature;
-          }
   function select(index, { scroll = true } = {}) {
     if (state.items.length === 0) return;
     index = Math.max(0, Math.min(state.items.length - 1, index));
