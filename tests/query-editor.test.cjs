@@ -37,6 +37,12 @@ test('filter syntax recognizes the families used by colored query labels', () =>
   for (const token of tokens.filter(t => t.key)) assert.equal(token.text.slice(0, token.text.indexOf(':') + 1), `${token.key}:`);
 });
 
+test('NOTIN is recognized and colored as a location filter', () => {
+  const tokens = editor('report NOTIN:"C:\\Projects"').tokens();
+  assert.deepEqual(tokens.filter(t => t.key).map(t => t.key), ['notin']);
+  assert.equal(tokens.find(t => t.key).text, 'NOTIN:"C:\\Projects"');
+});
+
 test('removing a filter preserves significant whitespace inside quoted names and paths', () => {
   const e = editor('"annual  report" AND type:pdf AND in:"C:\\My  Files"');
   e.remove('type:pdf');

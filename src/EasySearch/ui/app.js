@@ -280,7 +280,7 @@
     const tokens = [];
     for (const match of value.matchAll(/(?:[^"\s()]|"[^"]*(?:"|$))+/g)) {
       const text = match[0];
-      const filter = /^(type|t|ext|kind|size|date|dm|modified|changed|updated|datemodified|in|source|location|inside|foldername|where|under|parent|path|regex|folders?|files?):/i.exec(text);
+      const filter = /^(type|t|ext|kind|size|date|dm|modified|changed|updated|datemodified|notin|in|source|location|inside|foldername|where|under|parent|path|regex|folders?|files?):/i.exec(text);
       const logic = /^(AND|OR|NOT)$/i.test(text) && (text.toUpperCase() !== 'NOT' || text === 'NOT');
       if (filter || logic) tokens.push({ start: match.index, end: match.index + text.length,
         text, key: filter?.[1].toLowerCase(), logic: logic ? text.toLowerCase() : '' });
@@ -308,7 +308,7 @@
         const family = /^(type|t|ext|kind)$/.test(token.key) ? 'type'
           : /^(size)$/.test(token.key) ? 'size'
           : /^(date|dm|modified|changed|updated|datemodified)$/.test(token.key) ? 'date'
-          : /^(in|source|location|inside|where|under|parent|path|folder)$/.test(token.key) ? 'location'
+          : /^(notin|in|source|location|inside|where|under|parent|path|folder)$/.test(token.key) ? 'location'
           : /^(foldername)$/.test(token.key) ? 'foldername' : 'other';
         const label = span(token.text.slice(0, colon + 1), token.start, token.start + colon + 1, 'query-filter-label');
         const value = span(token.text.slice(colon + 1), token.start + colon + 1, token.end, 'query-filter-value');
@@ -441,7 +441,7 @@
   const FILTER_FORM = {
     size: 'size', type: 'type', t: 'type',
     date: 'date', dm: 'date', modified: 'date', changed: 'date', updated: 'date', datemodified: 'date',
-    in: 'place', source: 'place', location: 'place', where: 'place',
+    in: 'place', notin: 'place', source: 'place', location: 'place', where: 'place',
     foldername: 'foldername', inside: 'foldername',
   };
   const FILTER_PATTERN = new RegExp(`(^|\\s)(${Object.keys(FILTER_FORM).join('|')}):("[^"]*"|\\S*)`, 'gi');
