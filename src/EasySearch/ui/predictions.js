@@ -127,7 +127,9 @@ window.setupPredictions = (input, mirror, host) => {
       selected = (selected + direction + names.length) % names.length; render();
     } else if (event.key === 'Tab') {
       event.preventDefault(); event.stopImmediatePropagation();
-      const replacement = context.directory && context.quoted ? `"${context.replacement}` : context.replacement;
+      const replacement = context.directory
+        ? `${context.quoted ? '"' : ''}${context.replacement}${context.quoted ? '"' : ''}`
+        : context.replacement;
       input.setRangeText(replacement, context.directory ? context.replaceStart : context.start,
         context.directory ? context.replaceEnd : input.value.length, 'end');
       input.dispatchEvent(new Event('input', { bubbles: true })); render();
