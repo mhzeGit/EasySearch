@@ -76,7 +76,8 @@ public sealed class SearchTests : IDisposable
         var forks = SearchEngine.Run(index, new SearchRequest { Query = "fork", Sort = "name" }, onProgress: result => partial = result);
         Assert.Equal(["fork-fork-fork.txt", "forklift.txt"], forks.Items.Select(item => item.Name));
         Assert.NotNull(partial);
-        Assert.Equal(["fork-fork-fork.txt", "forklift.txt"], partial.Items.Select(item => item.Name));
+        // Progress is throttled and can be emitted before the matching partition finishes.
+        Assert.All(partial.Items, item => Assert.Contains(item.Name, new[] { "fork-fork-fork.txt", "forklift.txt" }));
         var folders = SearchEngine.Run(index, new SearchRequest { Query = "type:folder", Limit = 1000 });
         Assert.Null(folders.Error);
         Assert.NotEmpty(folders.Items);
@@ -497,6 +498,42 @@ public sealed class SearchTests : IDisposable
         Assert.Equal(0, second.FullScans);
         Assert.Equal(0, second.LocationScans);
         File.Delete(cache);
+    }
+
+    [Fact]
+    public void Startup_catch_up_is_saved_before_exit_and_reused_on_the_next_restart()
+    {
+        var cache = Path.Combine(Path.GetTempPath(), "EasySearchTests", Path.GetFileName(_root) + "-checkpoint.bin");
+        try
+        {
+            using (var first = new IndexService(cache))
+            {
+                first.Start(Scope());
+                WaitFor(() => !first.Status.Indexing && first.FullScans == 1);
+            }
+
+            Write(@"docs\offline-change.txt", 5, daysOld: 0);
+            using (var second = new IndexService(cache))
+            {
+                second.Start(Scope());
+                // Inspect the on-disk cache while the service is still running: disposal must not
+                // be what makes the caught-up index durable.
+                WaitFor(() => FileIndex.TryLoad(cache, Scope().Signature) is { } saved
+                    && Names("offline-change", index: saved).Length == 1);
+                Assert.Equal(0, second.FullScans);
+                Assert.Equal(0, second.LocationScans);
+            }
+
+            using var third = new IndexService(cache);
+            third.Start(Scope());
+            WaitFor(() => Names("offline-change", index: third.Index).Length == 1);
+            Assert.Equal(0, third.FullScans);
+            Assert.Equal(0, third.LocationScans);
+        }
+        finally
+        {
+            File.Delete(cache);
+        }
     }
 
     [Fact]

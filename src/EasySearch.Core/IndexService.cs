@@ -23,7 +23,7 @@ public sealed class IndexService : IDisposable
     const int SyncBatch = 512;
     static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
     static readonly TimeSpan RelaxedPollInterval = TimeSpan.FromSeconds(15);
-    static readonly TimeSpan SaveInterval = TimeSpan.FromHours(2);
+    static readonly TimeSpan SaveInterval = TimeSpan.FromMinutes(1);
     static readonly TimeSpan UnwatchedRescanAge = TimeSpan.FromHours(24);
 
     readonly string _cacheFile;
@@ -110,7 +110,7 @@ public sealed class IndexService : IDisposable
             _cancel = new CancellationTokenSource();
             cancel = _cancel.Token;
             _scope = scope;
-            _indexing = true;
+            _indexing = rebuild;
         }
         Changed?.Invoke();
         RunJob(() => Prepare(scope, rebuild, cancel), cancel);
@@ -193,6 +193,11 @@ public sealed class IndexService : IDisposable
             if (cancel.IsCancellationRequested) return;
             RescanRoot(scope, root, cancel);
         }
+        // Persist the catch-up before startup completes, rather than relying on a clean exit.
+        lock (_work)
+        {
+            if (_dirty && !cancel.IsCancellationRequested) Save();
+        }
     }
 
     /// <summary>Locations whose changes since the cache was written cannot be known without looking.</summary>
@@ -223,6 +228,8 @@ public sealed class IndexService : IDisposable
         }
 
         _fullBuild = true;
+        _indexing = true;
+        Changed?.Invoke();
         var timer = Stopwatch.StartNew();
         var built = IndexBuilder.Build(scope, cancel, onCreated: index =>
         {
@@ -281,6 +288,7 @@ public sealed class IndexService : IDisposable
 
             if (index.DeadCount > index.Count / 4) _index = index.Compact();
             _dirty = true;
+            Save(); // a completed recovery scan must survive an immediate restart
         }
         Interlocked.Increment(ref _locationScans);
         Interlocked.Increment(ref _changeCounter);
