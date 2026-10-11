@@ -4,6 +4,24 @@ namespace EasySearch.Tests;
 
 public sealed class FolderPredictionTests
 {
+    [Fact]
+    public void Predicts_child_directories_alphabetically_and_by_partial_prefix()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "EasySearchDirectoryPredictionTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "Zoo"));
+            Directory.CreateDirectory(Path.Combine(root, "Alpha"));
+            Directory.CreateDirectory(Path.Combine(root, "Alpine"));
+            File.WriteAllText(Path.Combine(root, "Also a file.txt"), "");
+
+            Assert.Equal(["Alpha", "Alpine", "Zoo"], DirectoryPrediction.FindAll(root));
+            Assert.Equal(["Alpine"], DirectoryPrediction.FindAll(root, "Alpi"));
+            Assert.Empty(DirectoryPrediction.FindAll(Path.Combine(root, "missing")));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Theory]
     [InlineData("Proj", "Projects")]
     [InlineData("Projecs", "Projects")]

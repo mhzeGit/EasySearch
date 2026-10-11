@@ -37,7 +37,15 @@ window.setupPredictions = (input, mirror, host) => {
     const filter = /(?:^|[\s(])([a-z-]+):("[^"]*"?|[^\s()]*)$/i.exec(value);
     if (filter && examples[filter[1].toLowerCase()] && (value.slice(0, filter.index).match(/"/g) || []).length % 2 === 0) {
       const operator = filter[1].toLowerCase(), raw = filter[2], typed = raw.replace(/^"|"$/g, '');
+      const directory = ['inside', 'foldername', 'folder-name', 'in', 'source', 'location', 'where', 'under', 'parent'].includes(operator) && /[\\/]/.test(typed);
       const folder = ['inside', 'foldername', 'folder-name', 'in'].includes(operator) && !!typed && !/[\\/:]/.test(typed);
+      if (directory) {
+        const split = Math.max(typed.lastIndexOf('\\'), typed.lastIndexOf('/'));
+        const directoryPath = typed.slice(0, split + 1), prefix = typed.slice(split + 1);
+        const quoted = raw.startsWith('"');
+        return { key: `directory:${operator}:${directoryPath}:${prefix}`, typed, raw, start: value.length - raw.length, directory: true, directoryPath, prefix, operator,
+          replaceStart: value.length - raw.length + (quoted ? 1 : 0), replaceEnd: value.length - (raw.endsWith('"') ? 1 : 0), quoted };
+      }
       return { key: `${folder ? 'folder' : operator}:${typed}`, typed, raw, start: value.length - raw.length, folder, operator };
     }
     const match = /(?:^|[\s(|])(?:inside|in|foldername):("[^"]*"?|[^\s()|]*)$/i.exec(value);
@@ -55,12 +63,17 @@ window.setupPredictions = (input, mirror, host) => {
     if (!context) return;
     if (context.key !== key) {
       key = context.key; selected = 0; names = []; clearTimeout(timer);
-      if (context.folder) {
+      if (context.directory) {
+        const path = context.directoryPath, prefix = context.prefix;
+        timer = setTimeout(() => host.post({ type: 'predictDirectory', path, prefix }), 80);
+      } else if (context.folder) {
         const prefix = context.typed;
         timer = setTimeout(() => host.post({ type: 'predictFolder', prefix }), 80);
       }
     }
-    if (context.operator && !context.folder) {
+    if (context.directory) {
+      // Directory child names are supplied asynchronously by the host.
+    } else if (context.operator && !context.folder) {
       const choices = examples[context.operator];
       const matches = choices.filter(([value]) => value.toLocaleLowerCase().startsWith(context.raw.toLocaleLowerCase()));
       names = (matches.length ? matches : choices).map(([value]) => value);
@@ -70,9 +83,12 @@ window.setupPredictions = (input, mirror, host) => {
     if (!names.length) return;
     selected %= names.length;
     const name = names[selected];
-    context.replacement = context.folder && (/[\s()|]/.test(name) || context.raw.startsWith('"')) ? `"${name}"` : name;
-    const suffix = context.replacement.toLocaleLowerCase().startsWith(context.raw.toLocaleLowerCase())
-      ? context.replacement.slice(context.raw.length) : ` → ${name}`;
+    context.replacement = context.directory
+      ? `${name}\\`
+      : context.folder && (/[\s()|]/.test(name) || context.raw.startsWith('"')) ? `"${name}"` : name;
+    const typedForSuffix = context.directory ? context.prefix : context.raw;
+    const suffix = context.replacement.toLocaleLowerCase().startsWith(typedForSuffix.toLocaleLowerCase())
+      ? context.replacement.slice(typedForSuffix.length) : ` → ${name}`;
     const description = context.operator && !context.folder ? examples[context.operator].find(([value]) => value === name)?.[1] : '';
     if (!suffix && names.length === 1 && !description) return;
     const target = [...mirror.querySelectorAll('[data-query-start]')].find(el => input.value.length >= +el.dataset.queryStart && input.value.length <= +el.dataset.queryEnd);
@@ -94,6 +110,9 @@ window.setupPredictions = (input, mirror, host) => {
     }
     if (message.type === 'folderPrediction' && key === `folder:${message.prefix}`) {
       names = message.names || []; selected = 0; render();
+    } else if (message.type === 'directoryPrediction' && context?.directory
+      && context.directoryPath === message.path && context.prefix === message.prefix) {
+      names = message.names || []; selected = 0; render();
     } else if (message.type === 'results') {
       results = (message.items || []).filter(item => !item.command).map(item => item.name); render();
     }
@@ -108,7 +127,9 @@ window.setupPredictions = (input, mirror, host) => {
       selected = (selected + direction + names.length) % names.length; render();
     } else if (event.key === 'Tab') {
       event.preventDefault(); event.stopImmediatePropagation();
-      input.setRangeText(context.replacement, context.start, input.value.length, 'end');
+      const replacement = context.directory && context.quoted ? `"${context.replacement}` : context.replacement;
+      input.setRangeText(replacement, context.directory ? context.replaceStart : context.start,
+        context.directory ? context.replaceEnd : input.value.length, 'end');
       input.dispatchEvent(new Event('input', { bubbles: true })); render();
     }
   }, true);

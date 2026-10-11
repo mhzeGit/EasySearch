@@ -109,6 +109,10 @@ public sealed partial class MainForm
                 PredictFolder(Text("prefix"));
                 break;
 
+            case "predictDirectory":
+                PredictDirectory(Text("path"), Text("prefix"));
+                break;
+
             case "cancelSearch":
                 _searchCancel?.Cancel();
                 break;

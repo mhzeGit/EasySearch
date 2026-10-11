@@ -20,4 +20,19 @@ public sealed partial class MainForm
             catch (OperationCanceledException) { }
         });
     }
+
+    void PredictDirectory(string path, string prefix)
+    {
+        _predictionCancel?.Cancel();
+        var cancel = _predictionCancel = new CancellationTokenSource();
+        Task.Run(() =>
+        {
+            try
+            {
+                var names = DirectoryPrediction.FindAll(path, prefix, cancel.Token);
+                if (!cancel.IsCancellationRequested) Post(new { type = "directoryPrediction", path, prefix, names });
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
 }
