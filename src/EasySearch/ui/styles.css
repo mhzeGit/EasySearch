@@ -161,6 +161,7 @@ svg.i { flex: none; display: block; }
 .query-highlight .query-filter-size { color: #c28aff; }
 .query-highlight .query-filter-date { color: #f3bd61; }
 .query-highlight .query-filter-location { color: #62d6b1; }
+.query-highlight .query-filter-notin { color: #ff5f5f; }
 .query-highlight .query-filter-foldername { color: #ff9f6e; }
 .query-highlight .query-filter-other { color: color-mix(in srgb, var(--accent) 78%, var(--text)); }
 /* Paint the pill beyond the glyphs without adding width to the input's text flow. */

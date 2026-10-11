@@ -308,7 +308,8 @@
         const family = /^(type|t|ext|kind)$/.test(token.key) ? 'type'
           : /^(size)$/.test(token.key) ? 'size'
           : /^(date|dm|modified|changed|updated|datemodified)$/.test(token.key) ? 'date'
-          : /^(notin|in|source|location|inside|where|under|parent|path|folder)$/.test(token.key) ? 'location'
+          : /^(in|source|location|inside|where|under|parent|path|folder)$/.test(token.key) ? 'location'
+          : /^(notin)$/.test(token.key) ? 'notin'
           : /^(foldername)$/.test(token.key) ? 'foldername' : 'other';
         const label = span(token.text.slice(0, colon + 1), token.start, token.start + colon + 1, 'query-filter-label');
         const value = span(token.text.slice(colon + 1), token.start + colon + 1, token.end, 'query-filter-value');
