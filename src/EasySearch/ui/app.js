@@ -712,20 +712,6 @@
     menu.open($('#btn-history'), items, { align: 'right', minWidth: 230 });
   }
 
-  function openHistoryMenu() {
-    const recent = recentSearches().filter(q => typeof q === 'string' && q.trim());
-    const items = recent.length
-      ? [{ head: 'Recent searches' }, ...recent.map(query => ({ label: query, icon: 'search', run: () => setQuery(query) }))]
-      : [{ head: 'Search history' }, { label: 'Open a result to save this search', icon: 'clock', run: () => {} }];
-    if (recent.length) {
-      items.push({ sep: true }, { label: 'Clear history', icon: 'x', run: () => {
-        try { localStorage.removeItem('recent'); } catch { /* storage unavailable */ }
-        toast('Search history cleared');
-      } });
-    }
-    menu.open(#btn-history, items, { align: 'right', minWidth: 230 });
-  }
-
   function homeCommands() {
     const place = label => state.places.find(p => p.label === label);
     const pathOfPlace = label => place(label)?.path;

@@ -173,6 +173,7 @@ public sealed class SearchTests : IDisposable
     public void Extension_and_type_filters()
     {
         Assert.Equal(["holiday.png", "IMG_0001.JPG", "IMG_0002.jpg"], Names("type:image"));
+        Assert.Equal(Names("type:image"), Names("t:image"));
         Assert.Equal(["Annual Report 2025.pdf", "annual report draft.docx"], Names("ext:pdf;docx"));
         // The index location itself is a result too (so "C:\" can be found); it shows with its full path.
         Assert.Equal(["app", "docs", "photos", "src"], Names("type:folder").Where(n => !Path.IsPathRooted(n)));

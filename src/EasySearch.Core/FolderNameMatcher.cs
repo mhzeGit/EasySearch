@@ -20,6 +20,9 @@ static class FolderNameMatcher
         foreach (var name in names)
         {
             int distance = Distance(requested, name);
+            // A typo correction should stay close to what the user typed. Otherwise an
+            // unrelated folder name would turn a valid search into an empty result set.
+            if (distance > Math.Max(1, requested.Length / 3)) continue;
             if (distance > best) continue;
             if (distance < best) { closest.Clear(); best = distance; }
             closest.Add(name);

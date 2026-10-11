@@ -191,11 +191,11 @@ static class QueryLogic
     // ---- helpers ------------------------------------------------------------------------
 
     static readonly HashSet<string> OperatorKeys = new(StringComparer.OrdinalIgnoreCase)
-        { "ext", "type", "kind", "folder", "folders", "file", "files", "size", "date", "dm", "modified", "datemodified", "changed", "updated",
+        { "ext", "type", "t", "kind", "folder", "folders", "file", "files", "size", "date", "dm", "modified", "datemodified", "changed", "updated",
           "in", "source", "location", "inside", "where", "under", "parent", "foldername", "folder-name", "path", "name", "regex" };
 
     /// <summary>Operators whose values are lists, so <c>a OR b</c> can become <c>key:a|b</c>.</summary>
-    static readonly HashSet<string> JoinableKeys = new(StringComparer.OrdinalIgnoreCase) { "ext", "type", "kind", "path", "name" };
+    static readonly HashSet<string> JoinableKeys = new(StringComparer.OrdinalIgnoreCase) { "ext", "type", "t", "kind", "path", "name" };
 
     /// <summary>The operator a token starts with ("ext" for "ext:pdf"), or null for plain text.</summary>
     static string? KeyOf(string token)
@@ -218,7 +218,10 @@ static class QueryLogic
             if (keys is [null])
                 return new Atom(string.Join('|', atoms.Select(a => a.Text)), false);
             if (keys is [{ } key] && JoinableKeys.Contains(key))
-                return new Atom(key + ":" + string.Join('|', atoms.Select(a => a.Text[(a.Text.IndexOf(':') + 1)..])), false);
+            {
+                var canonicalKey = key == "t" ? "type" : key;
+                return new Atom(canonicalKey + ":" + string.Join('|', atoms.Select(a => a.Text[(a.Text.IndexOf(':') + 1)..])), false);
+            }
         }
         return new AnyOf(items);
     }

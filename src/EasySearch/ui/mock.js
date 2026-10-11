@@ -155,9 +155,9 @@ window.createMockHost = () => {
         const range = dateRange(text.slice(text.indexOf(':') + 1));
         if (range.some(Number.isNaN)) error = `Can't read date "${text.slice(text.indexOf(':') + 1)}". Try date:today, date:7d or date:>2026-01-01`;
         else dateFilter = range;
-      } else if (/^(in|source|location|where|under|parent):/.test(text)) {
+      } else if (/^(source|location|where|under|parent):/.test(text)) {
         folderFilter = text.slice(text.indexOf(':') + 1).replace(/\\$/, '');
-      } else if (/^(inside|foldername|folder-name):/.test(text)) {
+      } else if (/^(in|inside|foldername|folder-name):/.test(text)) {
         folderNameFilter = text.slice(text.indexOf(':') + 1);
       } else if (text.startsWith('size:')) {
         const range = sizeRange(text.slice(5));

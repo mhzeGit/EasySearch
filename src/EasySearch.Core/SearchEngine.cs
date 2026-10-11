@@ -60,8 +60,9 @@ public static class SearchEngine
         var snapshot = index.Snapshot();
         if (snapshot.Count == 0) return new SearchResult { ElapsedMs = timer.Elapsed.TotalMilliseconds };
 
-        // Resolve each folder name once per search, including partial names and misspellings.
-        var insideNames = branches.SelectMany(b => b.Inside)
+        // Resolve a misspelled inside: value once, rather than repeating fuzzy work for every hit.
+        var insideNames = branches
+            .SelectMany(b => b.Inside)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToDictionary(name => name, name => FolderNameMatcher.Resolve(snapshot, name), StringComparer.OrdinalIgnoreCase);
 
@@ -185,6 +186,53 @@ public static class SearchEngine
                 Items = items,
             };
         }
+    }
+
+    static string? ResolveInsideName(IndexSnapshot snapshot, string requested)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < snapshot.Count; i++)
+        {
+            if ((snapshot.Flags[i] & (EntryFlags.Directory | EntryFlags.Deleted)) != EntryFlags.Directory
+                || snapshot.Parent[i] < 0) continue;
+            names.Add(snapshot.Name(i).ToString());
+        }
+
+        if (names.Contains(requested)) return names.First(name => name.Equals(requested, StringComparison.OrdinalIgnoreCase));
+
+        string? closest = null;
+        int bestDistance = int.MaxValue;
+        foreach (var name in names)
+        {
+            int distance = EditDistance(requested, name);
+            if (distance < bestDistance || (distance == bestDistance &&
+                string.Compare(name, closest, StringComparison.OrdinalIgnoreCase) < 0))
+            {
+                closest = name;
+                bestDistance = distance;
+            }
+        }
+        return closest;
+    }
+
+    static int EditDistance(string left, string right)
+    {
+        // Folder names are short; two rows keep the cost bounded to O(lengths) memory.
+        if (left.Length > right.Length) (left, right) = (right, left);
+        var previous = new int[left.Length + 1];
+        var current = new int[left.Length + 1];
+        for (int i = 0; i <= left.Length; i++) previous[i] = i;
+        for (int j = 1; j <= right.Length; j++)
+        {
+            current[0] = j;
+            for (int i = 1; i <= left.Length; i++)
+            {
+                int substitution = char.ToUpperInvariant(left[i - 1]) == char.ToUpperInvariant(right[j - 1]) ? 0 : 1;
+                current[i] = Math.Min(Math.Min(current[i - 1] + 1, previous[i] + 1), previous[i - 1] + substitution);
+            }
+            (previous, current) = (current, previous);
+        }
+        return previous[left.Length];
     }
 
     /// <summary>
@@ -388,6 +436,10 @@ public static class SearchEngine
                             int position = text.IndexOf(alternative.Text, _comparison);
                             matched = position >= 0;
                             if (matched && t == query.Primary) { primaryPosition = position; primaryLength = alternative.Text.Length; }
+                            break;
+                        case MatchKind.ExactName:
+                            matched = !term.OnPath && name.Equals(alternative.Text, _comparison);
+                            if (matched && t == query.Primary) { primaryPosition = 0; primaryLength = alternative.Text.Length; }
                             break;
                         case MatchKind.Wildcard:
                             matched = FileSystemName.MatchesSimpleExpression(alternative.Text, text, query.IgnoreCase);

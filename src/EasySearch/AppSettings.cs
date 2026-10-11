@@ -8,6 +8,7 @@ public sealed class AppSettings
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     const int CurrentSettingsVersion = 1;
+    const int CurrentExclusionsVersion = 1;
 
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
@@ -39,6 +40,7 @@ public sealed class AppSettings
     public List<string> Roots { get; set; } = [];
     /// <summary>Folder names (anywhere) or full folder paths left out of the index.</summary>
     public List<string> Excluded { get; set; } = [];
+    public int ExclusionsVersion { get; set; }
 
     public bool ShowHidden { get; set; }
     public bool ShowSystem { get; set; }
@@ -63,10 +65,19 @@ public sealed class AppSettings
         }
         // Turn on launch-at-login once for existing installs as well as new installs.
         // The version marker preserves a user's choice to turn it off on later launches.
-        if (settings.SettingsVersion < CurrentSettingsVersion)
+        if (settings.SettingsVersion < 1)
         {
             settings.LaunchAtLogin = true;
             settings.SettingsVersion = CurrentSettingsVersion;
+            settings.Save();
+        }
+        // Add these defaults once for existing installs too, while preserving later user edits.
+        if (settings.ExclusionsVersion < CurrentExclusionsVersion)
+        {
+            settings.Excluded ??= [];
+            if (!settings.Excluded.Contains("AppData", StringComparer.OrdinalIgnoreCase)) settings.Excluded.Add("AppData");
+            if (!settings.Excluded.Contains("Temp", StringComparer.OrdinalIgnoreCase)) settings.Excluded.Add("Temp");
+            settings.ExclusionsVersion = CurrentExclusionsVersion;
             settings.Save();
         }
         if (settings.Roots.Count == 0) settings.Roots = DefaultRoots();
@@ -96,6 +107,8 @@ public sealed class AppSettings
         [
             "$Recycle.Bin",
             "System Volume Information",
+            "AppData",
+            "Temp",
             "node_modules",
             ".git",
             Path.Combine(windows, "WinSxS"),

@@ -148,7 +148,7 @@ static class QueryParser
                     else q.RequiredExtensions.Add(extensions);
                     return;
 
-                case "type" or "kind":
+                case "type" or "t" or "kind":
                     ApplyKind(q, value, negate);
                     return;
 

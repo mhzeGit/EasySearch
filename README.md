@@ -19,7 +19,7 @@ Press **Win+Space** anywhere, type a few letters, hit Enter.
 - **Filters.** Type (folders, documents, images, video, audio, code, archives, apps, 3D models, or
   *Custom…* for names and suffixes such as `blender` or `.fbx`), size, date modified, and "only inside
   this folder". Pick one from a drop-down or type `type:`, `size:`, `date:` or `in:` — both give the
-  same small form in the search bar, which you can then adjust.
+  same small form in the search bar, which you can then adjust. `t:` is a shortcut for `type:`.
 - **Scope control.** Pick which drives and folders are indexed and which folders are left out
   (by name anywhere, like `node_modules`, or by full path). Hidden and system items are opt-in.
 - **Searches where you are.** Press the hotkey while a File Explorer window has focus and EasySearch
