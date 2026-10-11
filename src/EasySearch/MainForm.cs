@@ -131,7 +131,7 @@ public sealed partial class MainForm : Form
         }
         if (m.Msg == Native.WM_HOTKEY && m.WParam == HotkeyId)
         {
-            ShowPalette();
+            Toggle();
             return;
         }
         if (m.Msg == Native.WM_HOTKEY && m.WParam == ContextHotkeyId)
@@ -442,7 +442,7 @@ public sealed partial class MainForm : Form
         UnregisterHotkey();
         Native.RegisterHotKey(Handle, HotkeyId, Native.MOD_WIN | Native.MOD_NOREPEAT, 0x20);
         _hotkeyHook = HotkeyHook.TryInstall(0x20,
-            () => BeginInvoke(ShowPalette), () => BeginInvoke(ShowWithContext));
+            () => BeginInvoke(Toggle), () => BeginInvoke(ShowWithContext));
         _hotkeyRegistered = _hotkeyHook is not null;
         _contextHotkeyRegistered = Native.RegisterHotKey(Handle, ContextHotkeyId,
             Native.MOD_WIN | Native.MOD_ALT | Native.MOD_NOREPEAT, 0x20);
