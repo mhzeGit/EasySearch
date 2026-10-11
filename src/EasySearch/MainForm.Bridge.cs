@@ -105,6 +105,10 @@ public sealed partial class MainForm
                 Search(message.GetProperty("id").GetInt32(), message.Deserialize<SearchRequest>(AppSettings.Json)!);
                 break;
 
+            case "predictFolder":
+                PredictFolder(Text("prefix"));
+                break;
+
             case "cancelSearch":
                 _searchCancel?.Cancel();
                 break;

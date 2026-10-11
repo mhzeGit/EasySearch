@@ -272,6 +272,7 @@
   const queryHighlight = $('#query-highlight');
   const activeFilters = $('#active-filters');
   let queryComposing = false;
+  const onPredictionMessage = window.setupPredictions(els.query, queryHighlight, host);
 
   // The mirror must contain exactly the input's characters and typography. Controls and
   // abbreviated paths belong in the filter bar, never in the native input's text flow.
@@ -1671,6 +1672,7 @@
   }
 
   host.listen(message => {
+    onPredictionMessage(message);
     switch (message.type) {
       case 'init':
         state.settings = message.settings;

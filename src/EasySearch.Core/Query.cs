@@ -30,7 +30,7 @@ public sealed class SearchRequest
     public bool ShowSystem { get; set; }
 }
 
-enum MatchKind { Substring, Wildcard, Regex }
+enum MatchKind { Substring, ExactName, Wildcard, Regex }
 
 sealed class Alternative
 {
@@ -171,7 +171,16 @@ static class QueryParser
                     q.HasDate = true;
                     return;
 
-                case "in" or "source" or "location" or "where" or "under" or "parent":
+                case "in":
+                    if (negate) throw NotUnsupported(key);
+                    if (value.Length > 0)
+                    {
+                        if (value.IndexOfAny(['\\', '/', ':']) >= 0) q.Scope = value;
+                        else q.Inside.Add(value);
+                    }
+                    return;
+
+                case "source" or "location" or "where" or "under" or "parent":
                     if (negate) throw NotUnsupported(key);
                     if (value.Length > 0) q.Scope = value;
                     return;
