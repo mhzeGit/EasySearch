@@ -58,4 +58,21 @@ input.selectionStart = input.selectionEnd = 3;
 assert.equal(press('ArrowLeft'), false);
 inputHandlers.compositionstart();
 assert.equal(press('Tab'), false);
+inputHandlers.compositionend();
+for (const filter of ['date', 'dm', 'modified', 'datemodified', 'changed', 'updated', 'size', 'type', 't', 'kind', 'ext', 'inside', 'in', 'foldername', 'folder-name', 'source', 'location', 'where', 'under', 'parent', 'name', 'path', 'regex', 'file', 'files', 'folder', 'folders']) {
+  input.value = `${filter}:`; input.selectionStart = input.selectionEnd = input.value.length;
+  inputHandlers.input();
+  assert.ok(ghost.textContent.includes('·'), `${filter}: must explain its value format`);
+}
+input.value = 'date:>'; input.selectionStart = input.selectionEnd = input.value.length;
+inputHandlers.input();
+assert.match(ghost.textContent, /YYYY-MM-DD/);
+press('Tab');
+assert.equal(input.value, 'date:>2026-01-01');
+input.value = 'report date:'; input.selectionStart = input.selectionEnd = input.value.length;
+inputHandlers.input();
+for (let i = 0; i < 13; i++) press('ArrowDown');
+assert.match(ghost.textContent, /Between dates/);
+press('Tab');
+assert.equal(input.value, 'report date:2026-01-01..2026-12-31');
 console.log('Prediction navigation, wrapping, quoting, typo acceptance, stale responses, caret and IME checks passed.');
