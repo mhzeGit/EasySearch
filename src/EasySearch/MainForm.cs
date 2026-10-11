@@ -348,6 +348,9 @@ public sealed partial class MainForm : Form
             ? foregroundIsExplorer ? ExplorerFolder.FolderAsync(foreground) : ProjectFolder.FolderAsync(foreground)
             : !forceNormal && _settings.ScopeToExplorer && foregroundIsExplorer ? ExplorerFolder.FolderAsync(foreground) : null;
 
+        // Retrieve context before showing: the first search UI update includes the scoped folder.
+        string? contextPath = context && folder is not null ? folder.GetAwaiter().GetResult() : null;
+
         Show(); // positions the window and captures the backdrop when it was hidden
         // Hide-on-blur must not fire while focus is being moved onto the palette.
         _suppressHide = true;
@@ -356,9 +359,9 @@ public sealed partial class MainForm : Form
         Mark("focused");
         if (!_options.Passive) _web.Focus();
         Mark("web-focused");
+        if (context) Post(new { type = "contextOpen", path = contextPath });
         Post(new { type = "shown" });
-        if (context) Post(new { type = "contextOpen" });
-        if (context || (!forceNormal && _settings.ScopeToExplorer)) PostExplorerFolder(folder);
+        if (!context && !forceNormal && _settings.ScopeToExplorer) PostExplorerFolder(folder);
         if (Tracing) Trace("show steps:" + _marks);
     }
 

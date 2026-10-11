@@ -12,6 +12,16 @@ static partial class ProjectFolder
 
     static string? FolderOf(IntPtr window)
     {
+        // Unity and Unreal expose the open project path in their process arguments. Read this
+        // inexpensive source first; traversing large editor accessibility trees can take seconds.
+        try
+        {
+            Native.GetWindowThreadId(window, out uint processId);
+            string? project = FindProjectArgument(ReadCommandLine(processId));
+            if (project is not null) return project;
+        }
+        catch { }
+
         try
         {
             var root = AutomationElement.FromHandle(window);
@@ -39,9 +49,6 @@ static partial class ProjectFolder
             string? path = FindPath(title.ToString());
             if (path is not null) return path;
 
-            Native.GetWindowThreadId(window, out uint processId);
-            path = FindProjectArgument(ReadCommandLine(processId));
-            if (path is not null) return path;
             return null;
         }
         catch { return null; }
