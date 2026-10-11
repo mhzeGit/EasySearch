@@ -280,7 +280,7 @@
     const tokens = [];
     for (const match of value.matchAll(/(?:[^"\s()]|"[^"]*(?:"|$))+/g)) {
       const text = match[0];
-      const filter = /^(type|ext|kind|size|date|dm|modified|changed|updated|datemodified|in|source|location|inside|foldername|where|under|parent|path|regex|folders?|files?):/i.exec(text);
+      const filter = /^(type|t|ext|kind|size|date|dm|modified|changed|updated|datemodified|in|source|location|inside|foldername|where|under|parent|path|regex|folders?|files?):/i.exec(text);
       const logic = /^(AND|OR|NOT)$/i.test(text) && (text.toUpperCase() !== 'NOT' || text === 'NOT');
       if (filter || logic) tokens.push({ start: match.index, end: match.index + text.length,
         text, key: filter?.[1].toLowerCase(), logic: logic ? text.toLowerCase() : '' });
@@ -429,7 +429,7 @@
 
   /** Every spelling of a filter the backend accepts, and the form it opens. */
   const FILTER_FORM = {
-    size: 'size', type: 'type',
+    size: 'size', type: 'type', t: 'type',
     date: 'date', dm: 'date', modified: 'date', changed: 'date', updated: 'date', datemodified: 'date',
     in: 'place', source: 'place', location: 'place', where: 'place',
     foldername: 'foldername', inside: 'foldername',
@@ -620,7 +620,7 @@
 
   // ---- searching -------------------------------------------------------------------
 
-  const hasFilters = () => /\b(?:type|ext|kind|size|date|dm|modified|changed|updated|in|source|location|inside|foldername):\S+/i.test(state.query);
+  const hasFilters = () => /\b(?:type|t|ext|kind|size|date|dm|modified|changed|updated|in|source|location|inside|foldername):\S+/i.test(state.query);
   const hasQuery = () => state.query.trim().length > 0;
 
   function runSearch({ keepSelection = false } = {}) {
@@ -696,6 +696,34 @@
     if (!query) return;
     const recent = [query, ...recentSearches().filter(q => q !== query)].slice(0, 5);
     try { localStorage.setItem('recent', JSON.stringify(recent)); } catch { /* storage unavailable */ }
+  }
+
+  function openHistoryMenu() {
+    const recent = recentSearches().filter(q => typeof q === 'string' && q.trim());
+    const items = recent.length
+      ? [{ head: 'Recent searches' }, ...recent.map(query => ({ label: query, icon: 'search', run: () => setQuery(query) }))]
+      : [{ head: 'Search history' }, { label: 'Open a result to save this search', icon: 'clock', run: () => {} }];
+    if (recent.length) {
+      items.push({ sep: true }, { label: 'Clear history', icon: 'x', run: () => {
+        try { localStorage.removeItem('recent'); } catch { /* storage unavailable */ }
+        toast('Search history cleared');
+      } });
+    }
+    menu.open($('#btn-history'), items, { align: 'right', minWidth: 230 });
+  }
+
+  function openHistoryMenu() {
+    const recent = recentSearches().filter(q => typeof q === 'string' && q.trim());
+    const items = recent.length
+      ? [{ head: 'Recent searches' }, ...recent.map(query => ({ label: query, icon: 'search', run: () => setQuery(query) }))]
+      : [{ head: 'Search history' }, { label: 'Open a result to save this search', icon: 'clock', run: () => {} }];
+    if (recent.length) {
+      items.push({ sep: true }, { label: 'Clear history', icon: 'x', run: () => {
+        try { localStorage.removeItem('recent'); } catch { /* storage unavailable */ }
+        toast('Search history cleared');
+      } });
+    }
+    menu.open(#btn-history, items, { align: 'right', minWidth: 230 });
   }
 
   function homeCommands() {
@@ -1039,7 +1067,7 @@
       items.push({ sep: true },
         { label: 'Type folder path…', sub: 'C:\\Projects', run: () => insertFilterToken('in:') });
     }
-    const title = ({ type: 'File type', size: 'Size', date: 'Date modified', place: 'Folder' })[kind];
+    const title = ({ type: 'File type', t: 'File type', size: 'Size', date: 'Date modified', place: 'Folder' })[kind];
     items.unshift({ label: '‹ All filters', run: openAddFilters }, { head: title });
     menu.open($('#btn-add-filter'), items, { minWidth: 190 });
   }
@@ -1474,6 +1502,7 @@
   renderQueryHighlight();
 
   $('#btn-add-filter').addEventListener('click', openAddFilters);
+  $('#btn-history').addEventListener('click', openHistoryMenu);
   $('#btn-options').addEventListener('click', openOptionsMenu);
   $('#btn-settings').addEventListener('click', () => openSettings());
 
