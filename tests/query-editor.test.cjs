@@ -31,6 +31,12 @@ test('unfinished quoted values remain a single editable filter', () => {
   assert.deepEqual(editor('report in:"C:\\My folder').tokens().map(t => t.text), ['in:"C:\\My folder']);
 });
 
+test('filter syntax recognizes the families used by colored query labels', () => {
+  const tokens = editor('type:pdf size:>10mb date:today in:"C:\\Reports" foldername:annual').tokens();
+  assert.deepEqual(tokens.filter(t => t.key).map(t => t.key), ['type', 'size', 'date', 'in', 'foldername']);
+  for (const token of tokens.filter(t => t.key)) assert.equal(token.text.slice(0, token.text.indexOf(':') + 1), `${token.key}:`);
+});
+
 test('removing a filter preserves significant whitespace inside quoted names and paths', () => {
   const e = editor('"annual  report" AND type:pdf AND in:"C:\\My  Files"');
   e.remove('type:pdf');

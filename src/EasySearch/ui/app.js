@@ -303,7 +303,17 @@
     let html = '', at = 0;
     for (const token of tokens) {
       if (token.start > at) html += span(value.slice(at, token.start), at, token.start);
-      html += span(token.text, token.start, token.end, token.key ? 'query-filter' : 'logic-' + token.logic);
+      if (token.key) {
+        const colon = token.text.indexOf(':');
+        const family = /^(type|t|ext|kind)$/.test(token.key) ? 'type'
+          : /^(size)$/.test(token.key) ? 'size'
+          : /^(date|dm|modified|changed|updated|datemodified)$/.test(token.key) ? 'date'
+          : /^(in|source|location|inside|where|under|parent|path|folder)$/.test(token.key) ? 'location'
+          : /^(foldername)$/.test(token.key) ? 'foldername' : 'other';
+        const label = span(token.text.slice(0, colon + 1), token.start, token.start + colon + 1, 'query-filter-label');
+        const value = span(token.text.slice(colon + 1), token.start + colon + 1, token.end, 'query-filter-value');
+        html += '<span class="query-filter query-filter-' + family + '">' + label + value + '</span>';
+      } else html += span(token.text, token.start, token.end, 'logic-' + token.logic);
       at = token.end;
     }
     if (at < value.length) html += span(value.slice(at), at, value.length);
