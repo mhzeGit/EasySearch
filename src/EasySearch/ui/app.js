@@ -272,7 +272,7 @@
   const queryHighlight = $('#query-highlight');
   const activeFilters = $('#active-filters');
   let queryComposing = false;
-  let expandDirectoryPaths = false;
+  let expandedDirectoryStart = -1;
   const onPredictionMessage = window.setupPredictions(els.query, queryHighlight, host);
 
   // The mirror must contain exactly the input's characters and typography. Controls and
@@ -308,7 +308,7 @@
         const colon = token.text.indexOf(':');
         let shownValue = token.text.slice(colon + 1);
         const isDirectoryFilter = /^(in|notin|source|location|where|under|parent)$/.test(token.key);
-        if (!expandDirectoryPaths && isDirectoryFilter && shownValue.length > 52) {
+        if (expandedDirectoryStart !== token.start && isDirectoryFilter && shownValue.length > 52) {
           const quote = shownValue.startsWith('"') ? '"' : '';
           const closeQuote = shownValue.endsWith('"') ? '"' : '';
           const path = shownValue.slice(quote.length, shownValue.length - closeQuote.length);
@@ -1469,7 +1469,6 @@
 
   let searchTimer = 0;
   els.query.addEventListener('input', () => {
-    expandDirectoryPaths = true;
     const folderPick = FOLDER_PICK_TOKEN.exec(els.query.value);
     if (folderPick) {
       state.folderPickQuery = els.query.value.slice(0, folderPick.index).trimEnd();
@@ -1496,15 +1495,18 @@
     }, 120);
   });
   els.query.addEventListener('click', () => {
-    if (expandDirectoryPaths) return;
-    const hasLongDirectory = queryTokens(els.query.value).some(token => token.key &&
-      /^(in|notin|source|location|where|under|parent)$/.test(token.key) && token.text.length > 52);
-    if (hasLongDirectory) { expandDirectoryPaths = true; renderQueryHighlight(); }
+    const caret = els.query.selectionStart;
+    const token = queryTokens(els.query.value).find(item => item.key && caret >= item.start && caret <= item.end &&
+      /^(in|notin|source|location|where|under|parent)$/.test(item.key) && item.text.length > 52);
+    if (token && expandedDirectoryStart !== token.start) {
+      expandedDirectoryStart = token.start;
+      renderQueryHighlight();
+    }
   });
   els.query.addEventListener('scroll', syncQueryLayout);
   els.query.addEventListener('focus', syncQueryLayout);
   els.query.addEventListener('blur', () => {
-    expandDirectoryPaths = false;
+    expandedDirectoryStart = -1;
     renderQueryHighlight();
     if (typeof clearPrediction === 'function') clearPrediction();
   });
