@@ -272,6 +272,7 @@
   const queryHighlight = $('#query-highlight');
   const activeFilters = $('#active-filters');
   let queryComposing = false;
+  let expandDirectoryPaths = false;
   const onPredictionMessage = window.setupPredictions(els.query, queryHighlight, host);
 
   // The mirror must contain exactly the input's characters and typography. Controls and
@@ -305,6 +306,15 @@
       if (token.start > at) html += span(value.slice(at, token.start), at, token.start);
       if (token.key) {
         const colon = token.text.indexOf(':');
+        let shownValue = token.text.slice(colon + 1);
+        const isDirectoryFilter = /^(in|notin|source|location|where|under|parent)$/.test(token.key);
+        if (!expandDirectoryPaths && isDirectoryFilter && shownValue.length > 52) {
+          const quote = shownValue.startsWith('"') ? '"' : '';
+          const closeQuote = shownValue.endsWith('"') ? '"' : '';
+          const path = shownValue.slice(quote.length, shownValue.length - closeQuote.length);
+          const parts = path.split(/[\\/]+/).filter(Boolean);
+          shownValue = quote + '…\\' + parts.slice(-2).join('\\') + closeQuote;
+        }
         const family = /^(type|t|ext|kind)$/.test(token.key) ? 'type'
           : /^(size)$/.test(token.key) ? 'size'
           : /^(date|dm|modified|changed|updated|datemodified)$/.test(token.key) ? 'date'
@@ -312,7 +322,7 @@
           : /^(notin)$/.test(token.key) ? 'notin'
           : /^(foldername)$/.test(token.key) ? 'foldername' : 'other';
         const label = span(token.text.slice(0, colon + 1), token.start, token.start + colon + 1, 'query-filter-label');
-        const value = span(token.text.slice(colon + 1), token.start + colon + 1, token.end, 'query-filter-value');
+        const value = span(shownValue, token.start + colon + 1, token.end, 'query-filter-value');
         html += '<span class="query-filter query-filter-' + family + '">' + label + value + '</span>';
       } else html += span(token.text, token.start, token.end, 'logic-' + token.logic);
       at = token.end;
@@ -1459,6 +1469,7 @@
 
   let searchTimer = 0;
   els.query.addEventListener('input', () => {
+    expandDirectoryPaths = true;
     const folderPick = FOLDER_PICK_TOKEN.exec(els.query.value);
     if (folderPick) {
       state.folderPickQuery = els.query.value.slice(0, folderPick.index).trimEnd();
@@ -1484,9 +1495,17 @@
       newSearch();
     }, 120);
   });
+  els.query.addEventListener('click', () => {
+    if (expandDirectoryPaths) return;
+    const hasLongDirectory = queryTokens(els.query.value).some(token => token.key &&
+      /^(in|notin|source|location|where|under|parent)$/.test(token.key) && token.text.length > 52);
+    if (hasLongDirectory) { expandDirectoryPaths = true; renderQueryHighlight(); }
+  });
   els.query.addEventListener('scroll', syncQueryLayout);
   els.query.addEventListener('focus', syncQueryLayout);
   els.query.addEventListener('blur', () => {
+    expandDirectoryPaths = false;
+    renderQueryHighlight();
     if (typeof clearPrediction === 'function') clearPrediction();
   });
   els.query.addEventListener('select', syncQueryLayout);
