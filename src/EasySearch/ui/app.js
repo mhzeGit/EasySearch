@@ -272,7 +272,7 @@
   const queryHighlight = $('#query-highlight');
   const activeFilters = $('#active-filters');
   let queryComposing = false;
-  let expandedDirectoryStart = -1;
+  let expandedDirectoryText = '';
   const onPredictionMessage = window.setupPredictions(els.query, queryHighlight, host);
 
   // The mirror must contain exactly the input's characters and typography. Controls and
@@ -306,14 +306,23 @@
       if (token.start > at) html += span(value.slice(at, token.start), at, token.start);
       if (token.key) {
         const colon = token.text.indexOf(':');
-        let shownValue = token.text.slice(colon + 1);
+        const shownValue = token.text.slice(colon + 1);
         const isDirectoryFilter = /^(in|notin|source|location|where|under|parent)$/.test(token.key);
-        if (expandedDirectoryStart !== token.start && isDirectoryFilter && shownValue.length > 52) {
-          const quote = shownValue.startsWith('"') ? '"' : '';
-          const closeQuote = shownValue.endsWith('"') ? '"' : '';
-          const path = shownValue.slice(quote.length, shownValue.length - closeQuote.length);
-          const parts = path.split(/[\\/]+/).filter(Boolean);
-          shownValue = quote + '…\\' + parts.slice(-2).join('\\') + closeQuote;
+        let valueHtml;
+        const quote = shownValue.startsWith('"') ? 1 : 0;
+        const closeQuote = shownValue.endsWith('"') ? 1 : 0;
+        const path = shownValue.slice(quote, shownValue.length - closeQuote);
+        const parts = [...path.matchAll(/[^\\/]+/g)];
+        if (isDirectoryFilter && expandedDirectoryText !== token.text && shownValue.length > 52 && parts.length > 2) {
+          const suffixStart = quote + parts[parts.length - 2].index - 1;
+          const prefix = shownValue.slice(0, suffixStart);
+          const suffix = shownValue.slice(suffixStart);
+          valueHtml = '<span class="query-filter-value query-path-value" data-query-start="' +
+            (token.start + colon + 1) + '" data-query-end="' + token.end + '">' +
+            '<span class="query-path-prefix">' + esc(prefix) + '</span>' +
+            '<span>' + esc(suffix) + '</span><span class="query-path-ellipsis">…</span></span>';
+        } else {
+          valueHtml = '<span class="query-filter-value">' + esc(shownValue) + '</span>';
         }
         const family = /^(type|t|ext|kind)$/.test(token.key) ? 'type'
           : /^(size)$/.test(token.key) ? 'size'
@@ -322,13 +331,15 @@
           : /^(notin)$/.test(token.key) ? 'notin'
           : /^(foldername)$/.test(token.key) ? 'foldername' : 'other';
         const label = span(token.text.slice(0, colon + 1), token.start, token.start + colon + 1, 'query-filter-label');
-        const value = span(shownValue, token.start + colon + 1, token.end, 'query-filter-value');
-        html += '<span class="query-filter query-filter-' + family + '">' + label + value + '</span>';
+        html += '<span class="query-filter query-filter-' + family + '">' + label + valueHtml + '</span>';
       } else html += span(token.text, token.start, token.end, 'logic-' + token.logic);
       at = token.end;
     }
     if (at < value.length) html += span(value.slice(at), at, value.length);
     if (queryHighlight.innerHTML !== html) queryHighlight.innerHTML = html;
+    for (const ellipsis of queryHighlight.querySelectorAll('.query-path-ellipsis')) {
+      ellipsis.style.left = `${ellipsis.parentElement.querySelector('.query-path-prefix').offsetWidth}px`;
+    }
 
     const controls = tokens.filter(token => token.key && token.key !== 'folder').map(token => {
       const path = token.text.slice(token.key.length + 1).replace(/^"|"$/g, '');
@@ -1498,15 +1509,15 @@
     const caret = els.query.selectionStart;
     const token = queryTokens(els.query.value).find(item => item.key && caret >= item.start && caret <= item.end &&
       /^(in|notin|source|location|where|under|parent)$/.test(item.key) && item.text.length > 52);
-    if (token && expandedDirectoryStart !== token.start) {
-      expandedDirectoryStart = token.start;
+    if (token && expandedDirectoryText !== token.text) {
+      expandedDirectoryText = token.text;
       renderQueryHighlight();
     }
   });
   els.query.addEventListener('scroll', syncQueryLayout);
   els.query.addEventListener('focus', syncQueryLayout);
   els.query.addEventListener('blur', () => {
-    expandedDirectoryStart = -1;
+    expandedDirectoryText = '';
     renderQueryHighlight();
     if (typeof clearPrediction === 'function') clearPrediction();
   });
