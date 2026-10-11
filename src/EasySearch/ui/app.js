@@ -272,11 +272,11 @@
   const queryHighlight = $('#query-highlight');
   const activeFilters = $('#active-filters');
   let queryComposing = false;
-  let expandedDirectoryText = '';
+  let showFullDirectoryPaths = document.activeElement === els.query;
   const onPredictionMessage = window.setupPredictions(els.query, queryHighlight, host);
 
-  // The mirror must contain exactly the input's characters and typography. Controls and
-  // abbreviated paths belong in the filter bar, never in the native input's text flow.
+  // While editing, the mirror stays character-for-character aligned with the input. In the
+  // blurred state, long directory filters can use a compact visual label safely.
   function queryTokens(value) {
     const tokens = [];
     for (const match of value.matchAll(/(?:[^"\s()]|"[^"]*(?:"|$))+/g)) {
@@ -306,23 +306,15 @@
       if (token.start > at) html += span(value.slice(at, token.start), at, token.start);
       if (token.key) {
         const colon = token.text.indexOf(':');
-        const shownValue = token.text.slice(colon + 1);
+        let shownValue = token.text.slice(colon + 1);
         const isDirectoryFilter = /^(in|notin|source|location|where|under|parent)$/.test(token.key);
-        let valueHtml;
         const quote = shownValue.startsWith('"') ? 1 : 0;
         const closeQuote = shownValue.endsWith('"') ? 1 : 0;
         const path = shownValue.slice(quote, shownValue.length - closeQuote);
         const parts = [...path.matchAll(/[^\\/]+/g)];
-        if (isDirectoryFilter && expandedDirectoryText !== token.text && shownValue.length > 52 && parts.length > 2) {
-          const suffixStart = quote + parts[parts.length - 2].index - 1;
-          const prefix = shownValue.slice(0, suffixStart);
-          const suffix = shownValue.slice(suffixStart);
-          valueHtml = '<span class="query-filter-value query-path-value" data-query-start="' +
-            (token.start + colon + 1) + '" data-query-end="' + token.end + '">' +
-            '<span class="query-path-prefix">' + esc(prefix) + '</span>' +
-            '<span>' + esc(suffix) + '</span><span class="query-path-ellipsis">…</span></span>';
-        } else {
-          valueHtml = '<span class="query-filter-value">' + esc(shownValue) + '</span>';
+        if (!showFullDirectoryPaths && isDirectoryFilter && shownValue.length > 52 && parts.length > 2) {
+          const suffixStart = parts[parts.length - 2].index - 1;
+          shownValue = shownValue.slice(0, quote) + '…' + path.slice(suffixStart) + shownValue.slice(shownValue.length - closeQuote);
         }
         const family = /^(type|t|ext|kind)$/.test(token.key) ? 'type'
           : /^(size)$/.test(token.key) ? 'size'
@@ -331,16 +323,13 @@
           : /^(notin)$/.test(token.key) ? 'notin'
           : /^(foldername)$/.test(token.key) ? 'foldername' : 'other';
         const label = span(token.text.slice(0, colon + 1), token.start, token.start + colon + 1, 'query-filter-label');
-        html += '<span class="query-filter query-filter-' + family + '">' + label + valueHtml + '</span>';
+        const filterValue = span(shownValue, token.start + colon + 1, token.end, 'query-filter-value');
+        html += '<span class="query-filter query-filter-' + family + '">' + label + filterValue + '</span>';
       } else html += span(token.text, token.start, token.end, 'logic-' + token.logic);
       at = token.end;
     }
     if (at < value.length) html += span(value.slice(at), at, value.length);
     if (queryHighlight.innerHTML !== html) queryHighlight.innerHTML = html;
-    for (const ellipsis of queryHighlight.querySelectorAll('.query-path-ellipsis')) {
-      ellipsis.style.left = `${ellipsis.parentElement.querySelector('.query-path-prefix').offsetWidth}px`;
-    }
-
     const controls = tokens.filter(token => token.key && token.key !== 'folder').map(token => {
       const path = token.text.slice(token.key.length + 1).replace(/^"|"$/g, '');
       const folder = /^(in|source|location|where|under|parent)$/.test(token.key) && path;
@@ -1480,6 +1469,7 @@
 
   let searchTimer = 0;
   els.query.addEventListener('input', () => {
+    showFullDirectoryPaths = true;
     const folderPick = FOLDER_PICK_TOKEN.exec(els.query.value);
     if (folderPick) {
       state.folderPickQuery = els.query.value.slice(0, folderPick.index).trimEnd();
@@ -1505,19 +1495,15 @@
       newSearch();
     }, 120);
   });
-  els.query.addEventListener('click', () => {
-    const caret = els.query.selectionStart;
-    const token = queryTokens(els.query.value).find(item => item.key && caret >= item.start && caret <= item.end &&
-      /^(in|notin|source|location|where|under|parent)$/.test(item.key) && item.text.length > 52);
-    if (token && expandedDirectoryText !== token.text) {
-      expandedDirectoryText = token.text;
-      renderQueryHighlight();
-    }
-  });
   els.query.addEventListener('scroll', syncQueryLayout);
-  els.query.addEventListener('focus', syncQueryLayout);
+  els.query.addEventListener('focus', () => {
+    showFullDirectoryPaths = true;
+    renderQueryHighlight();
+    requestAnimationFrame(syncQueryLayout);
+  });
   els.query.addEventListener('blur', () => {
-    expandedDirectoryText = '';
+    showFullDirectoryPaths = false;
+    els.query.scrollLeft = 0;
     renderQueryHighlight();
     if (typeof clearPrediction === 'function') clearPrediction();
   });

@@ -157,9 +157,6 @@ svg.i { flex: none; display: block; }
 }
 .query-highlight .query-filter-label { font-weight: 700; }
 .query-highlight .query-filter-value { font-weight: 400; }
-.query-highlight .query-path-value { position: relative; }
-.query-highlight .query-path-prefix { visibility: hidden; }
-.query-highlight .query-path-ellipsis { position: absolute; top: 0; }
 .query-highlight .query-filter-type { color: #62b5ff; }
 .query-highlight .query-filter-size { color: #c28aff; }
 .query-highlight .query-filter-date { color: #f3bd61; }
