@@ -83,8 +83,8 @@ window.setupPredictions = (input, mirror, host) => {
     if (!node) return;
     const range = document.createRange(); range.setStart(node, offset); range.collapse(true);
     ghost.style.left = `${range.getBoundingClientRect().left - mirror.getBoundingClientRect().left}px`;
-    ghost.textContent = `${suffix || (name ? ` → ${name}` : '')}${description ? `  · ${description}` : ''}${names.length > 1 ? `  (${selected + 1}/${names.length})` : ''}`;
-    ghost.title = '←/↑ previous · →/↓ next · Tab accept';
+    ghost.textContent = `${suffix || (name ? ` → ${name}` : '')}${description ? `  · ${description}` : ''}${names.length > 1 ? `  ‹ ${selected + 1}/${names.length} ›` : ''}`;
+    ghost.title = '← previous prediction · → next prediction · Tab accept · ↑/↓ navigate results';
   }
   const onMessage = message => {
     if (message.type === 'init' && message.types) {
@@ -102,7 +102,7 @@ window.setupPredictions = (input, mirror, host) => {
     if (event.target !== input || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.isComposing) return;
     render();
     if (!ghost.textContent || !context) return;
-    const direction = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[event.key];
+    const direction = { ArrowLeft: -1, ArrowRight: 1 }[event.key];
     if (direction && names.length > 1) {
       event.preventDefault(); event.stopImmediatePropagation();
       selected = (selected + direction + names.length) % names.length; render();

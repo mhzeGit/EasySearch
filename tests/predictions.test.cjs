@@ -37,13 +37,17 @@ function press(key) {
   handlers.keydown({ key, target: input, preventDefault() { prevented = true; }, stopImmediatePropagation() {} });
   return prevented;
 }
-assert.equal(press('ArrowDown'), true);
+assert.match(ghost.textContent, /‹ 1\/3 ›/);
+assert.equal(press('ArrowDown'), false);
+assert.equal(press('ArrowUp'), false);
+assert.match(ghost.textContent, /1\/3/);
+assert.equal(press('ArrowRight'), true);
 assert.match(ghost.textContent, /Project Archive.*2\/3/);
 assert.equal(press('ArrowRight'), true);
 assert.match(ghost.textContent, /3\/3/);
 assert.equal(press('ArrowRight'), true);
 assert.match(ghost.textContent, /1\/3/);
-press('ArrowUp'); press('ArrowLeft');
+press('ArrowLeft'); press('ArrowLeft');
 assert.match(ghost.textContent, /2\/3/);
 press('Tab');
 assert.equal(input.value, 'report inside:"Project Archive"');
@@ -71,7 +75,7 @@ press('Tab');
 assert.equal(input.value, 'date:>2026-01-01');
 input.value = 'report date:'; input.selectionStart = input.selectionEnd = input.value.length;
 inputHandlers.input();
-for (let i = 0; i < 13; i++) press('ArrowDown');
+for (let i = 0; i < 13; i++) press('ArrowRight');
 assert.match(ghost.textContent, /Between dates/);
 press('Tab');
 assert.equal(input.value, 'report date:2026-01-01..2026-12-31');
