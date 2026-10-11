@@ -75,22 +75,13 @@ sealed class HotkeyHook : IDisposable
                 if (_held) return _discardHeld ? 1 : CallNextHookEx(_hook, code, message, data);
                 uint current = CurrentModifiers();
                 bool winSpace = _key == 0x20 && (current & Native.MOD_WIN) != 0;
-                if (winSpace && current == Native.MOD_WIN)
-                {
-                    _held = true;
-                    _discardHeld = true;
-                    // Windows never saw the second key, so releasing Win alone would open Start.
-                    Native.keybd_event(VK_UNASSIGNED, 0, 0, UIntPtr.Zero);
-                    Native.keybd_event(VK_UNASSIGNED, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                    _pressed();
-                    return 1;
-                }
                 if (winSpace && _contextPressed is not null)
                 {
                     _held = _discardHeld = true;
                     Native.keybd_event(VK_UNASSIGNED, 0, 0, UIntPtr.Zero);
                     Native.keybd_event(VK_UNASSIGNED, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
                     if (current == (Native.MOD_WIN | Native.MOD_ALT)) _contextPressed();
+                    else if (current == Native.MOD_WIN) _pressed();
                     return 1;
                 }
             }
