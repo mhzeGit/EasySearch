@@ -65,14 +65,25 @@ public static class SearchEngine
             .SelectMany(b => b.Inside)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToDictionary(name => name, name => FolderNameMatcher.Resolve(snapshot, name), StringComparer.OrdinalIgnoreCase);
+        var outsideNames = branches
+            .SelectMany(b => b.Outside)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(name => name, name => FolderNameMatcher.Resolve(snapshot, name), StringComparer.OrdinalIgnoreCase);
 
         var scopes = new Dictionary<string, bool[]>(StringComparer.OrdinalIgnoreCase);
         var scopeMasks = new bool[]?[branches.Count];
+        var outsideScopeMasks = new bool[]?[branches.Count];
         for (int b = 0; b < branches.Count; b++)
         {
             if (branches[b].Scope is not { } folder) continue;
             if (!scopes.TryGetValue(folder, out var mask)) scopes[folder] = mask = index.BuildScopeMask(folder, snapshot);
             scopeMasks[b] = mask;
+        }
+        for (int b = 0; b < branches.Count; b++)
+        {
+            if (branches[b].OutsideScope is not { } folder) continue;
+            if (!scopes.TryGetValue(folder, out var mask)) scopes[folder] = mask = index.BuildScopeMask(folder, snapshot);
+            outsideScopeMasks[b] = mask;
         }
 
         var sort = request.Sort.ToLowerInvariant() switch
@@ -95,8 +106,8 @@ public static class SearchEngine
         var ranking = new Ranking(snapshot, sort, descending);
         var worstFirst = Comparer<Hit>.Create((a, b) => ranking.Compare(b, a));
         var matcher = new Matcher(
-            [.. branches.Select((b, i) => new BranchMatcher(snapshot, b, scopeMasks[i], sort == SortKey.Relevance,
-                [.. b.Inside.Select(inside => insideNames[inside])]))]);
+            [.. branches.Select((b, i) => new BranchMatcher(snapshot, b, scopeMasks[i], outsideScopeMasks[i], sort == SortKey.Relevance,
+                [.. b.Inside.Select(inside => insideNames[inside])], [.. b.Outside.Select(outside => outsideNames[outside])]))]);
 
         // With OR branches there is no single piece of text every match must contain.
         string? driver = branches.Count == 1 ? FindDriver(query) : null;
@@ -362,12 +373,13 @@ public static class SearchEngine
         }
     }
 
-    sealed class BranchMatcher(IndexSnapshot snapshot, CompiledQuery query, bool[]? scope, bool score, string[][] resolvedInside)
+    sealed class BranchMatcher(IndexSnapshot snapshot, CompiledQuery query, bool[]? scope, bool[]? outsideScope, bool score, string[][] resolvedInside, string[][] resolvedOutside)
     {
         readonly Term[] _terms = [.. query.Terms];
         readonly HashSet<string>[] _required = [.. query.RequiredExtensions];
         readonly StringComparison _comparison = query.Comparison;
         readonly string[][] _inside = resolvedInside;
+        readonly string[][] _outside = resolvedOutside;
         readonly long _now = DateTime.UtcNow.Ticks;
         readonly EntryFlags _skip = EntryFlags.Deleted
             | (query.ShowHidden ? 0 : EntryFlags.Hidden | EntryFlags.HiddenTree)
@@ -384,6 +396,7 @@ public static class SearchEngine
             bool isDirectory = (flags & EntryFlags.Directory) != 0;
             if (isDirectory ? query.FilesOnly : query.FoldersOnly) return false;
             if (scope is not null && !scope[i]) return false;
+            if (outsideScope is not null && outsideScope[i]) return false;
 
             if (query.HasSize)
             {
@@ -399,6 +412,8 @@ public static class SearchEngine
             var name = snapshot.Name(i);
             foreach (var inside in _inside)
                 if (!inside.Any(folder => HasParentFolderNamed(snapshot, i, folder))) return false;
+            foreach (var outside in _outside)
+                if (outside.Any(folder => HasParentFolderNamed(snapshot, i, folder))) return false;
             if (_required.Length > 0 || query.ForbiddenExtensions is not null)
             {
                 if (isDirectory)

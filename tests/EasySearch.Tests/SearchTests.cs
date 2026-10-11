@@ -105,6 +105,18 @@ public sealed class SearchTests : IDisposable
     }
 
     [Fact]
+    public void Notin_excludes_named_parent_folders_and_path_scopes()
+    {
+        Assert.Equal(new[] { "Annual Report 2025.pdf", "annual report draft.docx", "holiday.png", "IMG_0001.JPG", "IMG_0002.jpg", "notes.txt" }.OrderBy(n => n),
+            Names("NOTIN:src type:file").OrderBy(n => n));
+
+        var src = Path.Combine(_root, "src");
+        Assert.DoesNotContain(Names($"NOTIN:\"{src}\" type:file"), n => n is "Program.cs" or "README.md" or "empty.log");
+        Assert.Contains("notes.txt", Names("NOTIN:photos type:file"));
+        Assert.DoesNotContain("IMG_0001.JPG", Names("NOTIN:photos type:file"));
+    }
+
+    [Fact]
     public void Multiple_inside_filters_require_all_parent_folders_in_either_order()
     {
         Write(@"blahblahfamily\unity\deep\nested.txt", 1, daysOld: 0);

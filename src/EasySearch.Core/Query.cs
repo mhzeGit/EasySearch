@@ -59,6 +59,8 @@ sealed class CompiledQuery
     public long SizeMin, SizeMax = long.MaxValue;
     public long ModifiedMin = long.MinValue, ModifiedMax = long.MaxValue; // [min, max) in UTC ticks
     public string? Scope;
+    public readonly List<string> Outside = [];
+    public string? OutsideScope;
     public readonly List<string> Inside = [];
     public bool IgnoreCase = true;
     public bool ShowHidden, ShowSystem;
@@ -73,7 +75,7 @@ sealed class CompiledQuery
 /// Syntax: words are AND-ed, <c>a|b</c> or <c>a OR b</c> is OR (see <see cref="QueryLogic"/> for
 /// AND, NOT and parentheses), <c>!word</c> negates, <c>"quoted phrase"</c>,
 /// <c>*</c>/<c>?</c> wildcards, and operators such as <c>ext:</c>, <c>size:</c>, <c>dm:</c>,
-/// <c>type:</c>, <c>path:</c>, <c>in:</c> and <c>regex:</c>.
+/// <c>type:</c>, <c>path:</c>, <c>in:</c>, <c>notin:</c> and <c>regex:</c>.
 /// </summary>
 static class QueryParser
 {
@@ -171,11 +173,17 @@ static class QueryParser
                     q.HasDate = true;
                     return;
 
-                case "in":
-                    if (negate) throw NotUnsupported(key);
+                case "in" or "notin":
+                    bool exclude = negate || key == "notin";
+                    if (negate && key == "notin") throw NotUnsupported(key);
                     if (value.Length > 0)
                     {
-                        if (value.IndexOfAny(['\\', '/', ':']) >= 0) q.Scope = value;
+                        if (value.IndexOfAny(['\\', '/', ':']) >= 0)
+                        {
+                            if (exclude) q.OutsideScope = value;
+                            else q.Scope = value;
+                        }
+                        else if (exclude) q.Outside.Add(value);
                         else q.Inside.Add(value);
                     }
                     return;
