@@ -44,7 +44,7 @@ window.setupPredictions = (input, mirror, host) => {
         const directoryPath = typed.slice(0, split + 1), prefix = typed.slice(split + 1);
         const quoted = raw.startsWith('"');
         return { key: `directory:${operator}:${directoryPath}:${prefix}`, typed, raw, start: value.length - raw.length, directory: true, directoryPath, prefix, operator,
-          replaceStart: value.length - raw.length + (quoted ? 1 : 0), replaceEnd: value.length - (raw.endsWith('"') ? 1 : 0), quoted };
+          tokenStart: value.length - filter[0].length + filter[0].indexOf(filter[1]), tokenEnd: value.length, quoted };
       }
       return { key: `${folder ? 'folder' : operator}:${typed}`, typed, raw, start: value.length - raw.length, folder, operator };
     }
@@ -127,11 +127,15 @@ window.setupPredictions = (input, mirror, host) => {
       selected = (selected + direction + names.length) % names.length; render();
     } else if (event.key === 'Tab') {
       event.preventDefault(); event.stopImmediatePropagation();
-      const replacement = context.directory
-        ? `${context.quoted ? '"' : ''}${context.replacement}${context.quoted ? '"' : ''}`
-        : context.replacement;
-      input.setRangeText(replacement, context.directory ? context.replaceStart : context.start,
-        context.directory ? context.replaceEnd : input.value.length, 'end');
+      if (context.directory) {
+        const token = input.value.slice(context.tokenStart, context.tokenEnd);
+        const colon = token.indexOf(':');
+        const quote = context.quoted ? '"' : '';
+        const replacement = `${token.slice(0, colon + 1)}${quote}${context.directoryPath}${context.replacement}${quote}`;
+        input.setRangeText(replacement, context.tokenStart, context.tokenEnd, 'end');
+      } else {
+        input.setRangeText(context.replacement, context.start, input.value.length, 'end');
+      }
       input.dispatchEvent(new Event('input', { bubbles: true })); render();
     }
   }, true);
