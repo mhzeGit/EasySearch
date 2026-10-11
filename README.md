@@ -63,12 +63,16 @@ dotnet publish src/EasySearch -c Release -r win-x64 --self-contained false -o pu
 | `ext:pdf`, `ext:jpg;png` | by extension |
 | `type:pdf`, `type:.fbx`, `type:png,jpg` | by suffix — the dot is optional |
 | `type:image`, `type:3d`, `type:blender`, `type:photoshop` | by kind or by the tool's name: `folder`, `file`, `image`, `video`, `audio`, `document`, `code`, `archive`, `app`, `3d`, `cad`, `spreadsheet`, `font`, `blender`, `word`, `python`, … (spaces and dashes are ignored: `3D models`) |
-| `size:>100mb`, `size:1mb..1gb`, `size:1mb-10mb`, `size:empty` | by size (`tiny` … `gigantic` also work; `size:1-10mb` borrows the unit) |
+| `size:>100mb`, `size:1mb..1gb`, `size:1mb-10mb`, `size:empty` | files and folders by size (`tiny` … `gigantic` also work; `size:1-10mb` borrows the unit) |
 | `date:today`, `date:7d`, `date:2026-03`, `date:>2026-01-01`, `date:2026-01..2026-03` | by date modified (`modified:` and `dm:` work too) |
 | `in:C:\Projects` | only inside this exact folder (`source:` and `location:` work too) |
 | `inside:Photos` | only in a folder named `Photos` (matches every folder with that name) |
 | `src\ main`, `path:backup` | a backslash (or `path:`) matches against the full path |
 | `regex:^IMG_\d+` | regular expressions |
+
+Folder sizes are cached sums of indexed descendant files, updated as files change. Excluded,
+unreadable, and unscanned linked-folder contents are not counted. Use `type:folder size:>1gb`
+for folders only, or `type:file` to keep size searches restricted to files.
 
 Typing `folder:` opens File Explorer to choose a directory. Typing `size:`, `type:`, `date:`, `in:` or `inside:` in the box turns it into a small form under the box, so you
 can see what to fill in: size takes *at least / at most / between / exactly*, a number and a

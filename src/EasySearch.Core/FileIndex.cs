@@ -192,16 +192,19 @@ public sealed class FileIndex
         {
             if ((_flags[parent] & EntryFlags.Deleted) != 0) return;
             EnsureCapacity(_count + entries.Count, _namesLength + names.Length);
+            long addedBytes = 0;
             foreach (ref readonly var e in CollectionsMarshal.AsSpan(entries))
             {
-                int index = AppendLocked(parent, names.Slice(e.NameStart, e.NameLength), e.Size, e.Modified, e.Flags);
+                int index = AppendLocked(parent, names.Slice(e.NameStart, e.NameLength), e.Size, e.Modified, e.Flags, aggregate: false);
+                addedBytes += _size[index];
                 if ((e.Flags & EntryFlags.Directory) != 0) directoryIndices.Add(index);
             }
+            AdjustAncestorsLocked(parent, addedBytes);
             _version++;
         }
     }
 
-    int AppendLocked(int parent, ReadOnlySpan<char> name, long size, long modified, EntryFlags flags)
+    int AppendLocked(int parent, ReadOnlySpan<char> name, long size, long modified, EntryFlags flags, bool aggregate = true)
     {
         if (name.Length > ushort.MaxValue) name = name[..ushort.MaxValue];
         EnsureCapacity(_count + 1, _namesLength + name.Length);
@@ -212,7 +215,10 @@ public sealed class FileIndex
         _nameLength[i] = (ushort)name.Length;
         _namesLength += name.Length;
         _parent[i] = parent;
-        _size[i] = size;
+        // Directories contain the sum of indexed descendant files, never a scanner's
+        // directory-entry size. Updating ancestors avoids any filesystem work at search time.
+        _size[i] = (flags & EntryFlags.Directory) != 0 ? 0 : size;
+        if (aggregate) AdjustAncestorsLocked(parent, _size[i]);
         _modified[i] = modified;
         if (parent >= 0 && (_flags[parent] & (EntryFlags.Hidden | EntryFlags.HiddenTree)) != 0)
             flags |= EntryFlags.HiddenTree;
@@ -375,9 +381,9 @@ public sealed class FileIndex
                         if (c.Exists && wasDirectory == isDirectory)
                         {
                             var flags = c.Flags | (_flags[i] & EntryFlags.HiddenTree);
-                            if (_size[i] != c.Size || _modified[i] != c.Modified || _flags[i] != flags)
+                            if ((!isDirectory && _size[i] != c.Size) || _modified[i] != c.Modified || _flags[i] != flags)
                             {
-                                _size[i] = c.Size;
+                                if (!isDirectory) SetFileSizeLocked(i, c.Size);
                                 _modified[i] = c.Modified;
                                 _flags[i] = flags;
                                 changed = true;
@@ -457,9 +463,9 @@ public sealed class FileIndex
                         if (wasDirectory == isDirectory)
                         {
                             var flags = e.Flags | (_flags[i] & EntryFlags.HiddenTree);
-                            if (_size[i] != e.Size || _modified[i] != e.Modified || _flags[i] != flags)
+                            if ((!isDirectory && _size[i] != e.Size) || _modified[i] != e.Modified || _flags[i] != flags)
                             {
-                                _size[i] = e.Size;
+                                if (!isDirectory) SetFileSizeLocked(i, e.Size);
                                 _modified[i] = e.Modified;
                                 _flags[i] = flags;
                                 changed = true;
@@ -574,10 +580,25 @@ public sealed class FileIndex
 
     void KillLocked(int i)
     {
+        AdjustAncestorsLocked(_parent[i], -_size[i]);
+        _size[i] = 0;
         if ((_flags[i] & EntryFlags.Directory) != 0)
             _dirs.Remove(new DirKey(_parent[i], new string(_names, _nameStart[i], _nameLength[i])));
         _flags[i] |= EntryFlags.Deleted;
         _live--;
+    }
+
+    void SetFileSizeLocked(int i, long size)
+    {
+        AdjustAncestorsLocked(_parent[i], size - _size[i]);
+        _size[i] = size;
+    }
+
+    void AdjustAncestorsLocked(int parent, long delta)
+    {
+        if (delta == 0) return;
+        for (int p = parent; p >= 0 && (_flags[p] & EntryFlags.Deleted) == 0; p = _parent[p])
+            _size[p] += delta;
     }
 
     // ---- persistence -------------------------------------------------------------------
@@ -680,6 +701,16 @@ public sealed class FileIndex
                 index._live++;
                 if (p >= 0 && (flags & EntryFlags.Directory) != 0)
                     index._dirs[new DirKey(p, new string(index._names, index._nameStart[i], index._nameLength[i]))] = i;
+            }
+            // Upgrade older v2 caches (which stored zero directory sizes) using only
+            // indexed metadata. Reverse order works because parents precede children.
+            for (int i = 0; i < count; i++)
+                if ((index._flags[i] & EntryFlags.Directory) != 0) index._size[i] = 0;
+            for (int i = count - 1; i >= 0; i--)
+            {
+                int p = index._parent[i];
+                if (p >= 0 && (index._flags[i] & EntryFlags.Deleted) == 0 && (index._flags[p] & EntryFlags.Deleted) == 0)
+                    index._size[p] += index._size[i];
             }
             return index;
         }

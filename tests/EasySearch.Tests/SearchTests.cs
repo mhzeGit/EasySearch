@@ -322,9 +322,9 @@ public sealed class SearchTests : IDisposable
     [Fact]
     public void Size_and_date_filters()
     {
-        Assert.Equal(["Annual Report 2025.pdf", "IMG_0001.JPG", "IMG_0002.jpg"], Names("size:>1mb"));
-        Assert.Equal(["annual report draft.docx", "holiday.png"], Names("size:10kb..1mb"));
-        Assert.Equal(["empty.log"], Names("size:empty"));
+        Assert.Equal(["Annual Report 2025.pdf", "IMG_0001.JPG", "IMG_0002.jpg"], Names("type:file size:>1mb"));
+        Assert.Equal(["annual report draft.docx", "holiday.png"], Names("type:file size:10kb..1mb"));
+        Assert.Equal(["empty.log"], Names("type:file size:empty"));
         Assert.Equal(["notes.txt"], Names("dm:today type:file"));
         Assert.Equal(["annual report draft.docx", "notes.txt"], Names("dm:7d ext:docx|txt"));
         Assert.Equal(["Annual Report 2025.pdf"], Names($"dm:<{DateTime.Now.AddDays(-200):yyyy-MM-dd} type:file"));

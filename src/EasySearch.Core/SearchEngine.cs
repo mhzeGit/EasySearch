@@ -388,7 +388,7 @@ public static class SearchEngine
             if (query.HasSize)
             {
                 long size = snapshot.Size[i];
-                if (isDirectory || size < query.SizeMin || size > query.SizeMax) return false;
+                if (size < query.SizeMin || size > query.SizeMax) return false;
             }
             if (query.HasDate)
             {

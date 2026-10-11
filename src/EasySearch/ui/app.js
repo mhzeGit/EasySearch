@@ -810,7 +810,7 @@
           if (row.dataset.signature !== signature) {
             row.querySelector('.row-name').innerHTML = highlight(item.name, terms);
             row.querySelector('.row-path').textContent = item.dir;
-            row.querySelector('.row-meta').innerHTML = `<b>${formatDate(item.modified)}</b><span>${item.isDir ? 'Folder' : formatSize(item.size)}</span>`;
+            row.querySelector('.row-meta').innerHTML = `<b>${formatDate(item.modified)}</b><span>${formatSize(item.size)}</span>`;
             row.classList.toggle('dim', !!item.hidden);
             row.dataset.signature = signature;
           }
@@ -819,7 +819,7 @@
           holder.innerHTML = `<div class="row${index === state.selected ? ' sel' : ''}${item.hidden ? ' dim' : ''}" data-i="${index}" data-key="${esc(key)}" data-signature="${esc(signature)}" role="option">
             ${rowIcon(item)}
             <span class="row-main"><span class="row-name">${highlight(item.name, terms)}</span><span class="row-path">${esc(item.dir)}</span></span>
-            <span class="row-meta"><b>${formatDate(item.modified)}</b><span>${item.isDir ? 'Folder' : formatSize(item.size)}</span></span>
+            <span class="row-meta"><b>${formatDate(item.modified)}</b><span>${formatSize(item.size)}</span></span>
           </div>`;
           row = holder.firstElementChild;
           if (keepScroll && !window.matchMedia('(prefers-reduced-motion: reduce)').matches)
@@ -940,7 +940,7 @@
       <dl class="pv-meta">
         <dt>Where</dt><dd class="path">${esc(item.dir || path)}</dd>
         <dt>Modified</dt><dd>${esc(longDate.format(new Date(item.modified)))}</dd>
-        ${item.isDir ? '' : `<dt>Size</dt><dd>${formatSize(item.size)}${item.size >= KB ? ` (${number.format(item.size)} bytes)` : ''}</dd>`}
+        <dt>${item.isDir ? 'Indexed size' : 'Size'}</dt><dd>${formatSize(item.size)}${item.size >= KB ? ` (${number.format(item.size)} bytes)` : ''}</dd>
         ${item.hidden ? '<dt>Attributes</dt><dd>Hidden</dd>' : ''}
       </dl>
       <pre class="pv-text" id="pv-text" hidden></pre>`;
