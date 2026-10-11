@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+using System.Management;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Automation;
@@ -36,9 +36,53 @@ static partial class ProjectFolder
         {
             var title = new StringBuilder(1024);
             Native.GetWindowTextW(window, title, title.Capacity);
-            return FindPath(title.ToString());
+            string? path = FindPath(title.ToString());
+            if (path is not null) return path;
+
+            Native.GetWindowThreadId(window, out uint processId);
+            path = FindProjectArgument(ReadCommandLine(processId));
+            if (path is not null) return path;
+            return null;
         }
         catch { return null; }
+    }
+
+    static string? FindProjectArgument(string? commandLine)
+    {
+        if (string.IsNullOrWhiteSpace(commandLine)) return null;
+        // Unity and Unreal commonly pass their open project as an option argument.
+        var project = Regex.Match(commandLine, "(?:-projectPath|-project|/project)\\s+(?:\\\"([^\\\"]+)\\\"|(\\S+))", RegexOptions.IgnoreCase);
+        if (project.Success)
+        {
+            string value = project.Groups[1].Success ? project.Groups[1].Value : project.Groups[2].Value;
+            string? folder = ExistingPath(value);
+            if (folder is not null) return folder;
+        }
+        return FindPath(commandLine);
+    }
+
+    static string? ExistingPath(string value)
+    {
+        try
+        {
+            value = Environment.ExpandEnvironmentVariables(value.Trim().Trim('"'));
+            if (!Path.IsPathRooted(value)) return null;
+            if (File.Exists(value)) value = Path.GetDirectoryName(value)!;
+            return Directory.Exists(value) ? Path.GetFullPath(value) : null;
+        }
+        catch { return null; }
+    }
+
+    static string? ReadCommandLine(uint processId)
+    {
+        if (processId == 0) return null;
+        try
+        {
+            using var query = new ManagementObjectSearcher($"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {processId}");
+            foreach (ManagementObject item in query.Get()) return item["CommandLine"]?.ToString();
+        }
+        catch { }
+        return null;
     }
 
     static string? FindElementPath(AutomationElement element)
@@ -70,4 +114,5 @@ static partial class ProjectFolder
 
     [GeneratedRegex("[A-Za-z]:\\\\[^\\\"\\r\\n<>|?*]+")]
     private static partial Regex PathRegex();
+
 }

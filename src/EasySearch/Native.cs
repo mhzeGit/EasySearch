@@ -85,6 +85,9 @@ static class Native
     [DllImport("user32.dll")]
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr processId);
 
+    [DllImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")]
+    public static extern uint GetWindowThreadId(IntPtr hWnd, out uint processId);
+
     [DllImport("kernel32.dll")]
     public static extern uint GetCurrentThreadId();
 
