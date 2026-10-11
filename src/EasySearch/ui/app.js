@@ -1724,6 +1724,7 @@
       case 'theme': document.documentElement.dataset.theme = message.theme; break;
       case 'status': onStatus(message); break;
       case 'explorerFolder': onExplorerFolder(message.path); break;
+      case 'contextOpen': setQuery(''); break;
       case 'results':
         try { onResults(message); }
         catch (error) {

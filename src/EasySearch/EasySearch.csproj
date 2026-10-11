@@ -27,4 +27,9 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Reference Include="$(NetCoreTargetingPackRoot)\Microsoft.WindowsDesktop.App.Ref\10.0.12\ref\net10.0\UIAutomationClient.dll" />
+    <Reference Include="$(NetCoreTargetingPackRoot)\Microsoft.WindowsDesktop.App.Ref\10.0.12\ref\net10.0\UIAutomationTypes.dll" />
+  </ItemGroup>
+
 </Project>

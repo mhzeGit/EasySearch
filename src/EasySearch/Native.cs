@@ -76,6 +76,9 @@ static class Native
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern int GetClassNameW(IntPtr hWnd, System.Text.StringBuilder className, int maxCount);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowTextW(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
+
     [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(IntPtr hWnd);
 

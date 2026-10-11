@@ -24,17 +24,19 @@ sealed class HotkeyHook : IDisposable
 
     readonly HookProc _callback; // kept in a field so the delegate outlives the native hook
     readonly Action _pressed;
-    readonly uint _modifiers, _key;
+    readonly Action? _contextPressed;
+    readonly uint _key;
     Thread? _thread;
     uint _threadId;
     IntPtr _hook;
     bool _held;
+    bool _discardHeld;
 
-    HotkeyHook(uint modifiers, uint key, Action pressed)
+    HotkeyHook(uint key, Action pressed, Action? contextPressed = null)
     {
-        _modifiers = modifiers;
         _key = key;
         _pressed = pressed;
+        _contextPressed = contextPressed;
         _callback = OnKey;
     }
 
@@ -42,9 +44,9 @@ sealed class HotkeyHook : IDisposable
     /// Installs the hook. <paramref name="pressed"/> is called on the hook's own thread and must
     /// return at once (hand the work to the UI thread). Returns null if Windows refuses the hook.
     /// </summary>
-    public static HotkeyHook? TryInstall(uint modifiers, uint key, Action pressed)
+    public static HotkeyHook? TryInstall(uint key, Action pressed, Action? contextPressed = null)
     {
-        var hook = new HotkeyHook(modifiers, key, pressed);
+        var hook = new HotkeyHook(key, pressed, contextPressed);
         using var installed = new ManualResetEventSlim();
         hook._thread = new Thread(() =>
         {
@@ -70,25 +72,32 @@ sealed class HotkeyHook : IDisposable
             int kind = (int)message;
             if (kind is WM_KEYDOWN or WM_SYSKEYDOWN)
             {
-                if (_held) return 1; // auto-repeat while held
-                if (CurrentModifiers() == _modifiers)
+                if (_held) return _discardHeld ? 1 : CallNextHookEx(_hook, code, message, data);
+                uint current = CurrentModifiers();
+                bool winSpace = _key == 0x20 && (current & Native.MOD_WIN) != 0;
+                if (winSpace && current == Native.MOD_WIN)
                 {
                     _held = true;
-                    if ((_modifiers & Native.MOD_WIN) != 0)
-                    {
-                        // Windows never saw the second key, so releasing Win alone would open the
-                        // Start menu. A press of an unassigned key tells it the Win key was "used".
-                        Native.keybd_event(VK_UNASSIGNED, 0, 0, UIntPtr.Zero);
-                        Native.keybd_event(VK_UNASSIGNED, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                    }
+                    _discardHeld = true;
+                    // Windows never saw the second key, so releasing Win alone would open Start.
+                    Native.keybd_event(VK_UNASSIGNED, 0, 0, UIntPtr.Zero);
+                    Native.keybd_event(VK_UNASSIGNED, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
                     _pressed();
+                    return 1;
+                }
+                if (winSpace && _contextPressed is not null)
+                {
+                    _held = _discardHeld = true;
+                    Native.keybd_event(VK_UNASSIGNED, 0, 0, UIntPtr.Zero);
+                    Native.keybd_event(VK_UNASSIGNED, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+                    if (current == (Native.MOD_WIN | Native.MOD_ALT)) _contextPressed();
                     return 1;
                 }
             }
             else if (kind is WM_KEYUP or WM_SYSKEYUP && _held)
             {
                 _held = false;
-                return 1;
+                if (_discardHeld) { _discardHeld = false; return 1; }
             }
         }
         return CallNextHookEx(_hook, code, message, data);

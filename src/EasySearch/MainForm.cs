@@ -12,6 +12,7 @@ namespace EasySearch;
 public sealed partial class MainForm : Form
 {
     const int HotkeyId = 0x4553;
+    const int ContextHotkeyId = 0x4554;
     const string AppHost = "easysearch.example";
     const string ImageHost = "images.easysearch.example";
 
@@ -33,6 +34,7 @@ public sealed partial class MainForm : Form
     bool _quitting;
     bool _suppressHide;
     bool _hotkeyRegistered;
+    bool _contextHotkeyRegistered;
     HotkeyHook? _hotkeyHook;
     int _statusDirty;
     double _uiScale;
@@ -129,7 +131,12 @@ public sealed partial class MainForm : Form
         }
         if (m.Msg == Native.WM_HOTKEY && m.WParam == HotkeyId)
         {
-            Toggle();
+            ShowPalette();
+            return;
+        }
+        if (m.Msg == Native.WM_HOTKEY && m.WParam == ContextHotkeyId)
+        {
+            ShowWithContext();
             return;
         }
         base.WndProc(ref m);
@@ -334,11 +341,17 @@ public sealed partial class MainForm : Form
     /// <summary>Development: with --passive the window never takes keyboard focus, so it can be inspected without interrupting work.</summary>
     protected override bool ShowWithoutActivation => _options.Passive;
 
-    public void ShowPalette()
+    public void ShowPalette() => ShowPalette(context: false, forceNormal: true);
+
+    void ShowWithContext() => ShowPalette(context: true, forceNormal: false);
+
+    void ShowPalette(bool context, bool forceNormal)
     {
         // Looked at before the palette takes focus: this is the window the user was working in.
-        var explorer = _settings.ScopeToExplorer && IsHandleCreated ? ExplorerFolder.ForegroundExplorer(Handle) : IntPtr.Zero;
-        var folder = explorer != IntPtr.Zero ? ExplorerFolder.FolderAsync(explorer) : null;
+        var foreground = IsHandleCreated ? Native.GetForegroundWindow() : IntPtr.Zero;
+        var folder = !forceNormal && context && foreground != IntPtr.Zero
+            ? ProjectFolder.FolderAsync(foreground)
+            : !forceNormal && _settings.ScopeToExplorer ? ExplorerFolder.FolderAsync(ExplorerFolder.ForegroundExplorer(Handle)) : null;
 
         Show(); // positions the window and captures the backdrop when it was hidden
         // Hide-on-blur must not fire while focus is being moved onto the palette.
@@ -349,7 +362,8 @@ public sealed partial class MainForm : Form
         if (!_options.Passive) _web.Focus();
         Mark("web-focused");
         Post(new { type = "shown" });
-        if (_settings.ScopeToExplorer) PostExplorerFolder(folder);
+        if (context) Post(new { type = "contextOpen" });
+        if (context || (!forceNormal && _settings.ScopeToExplorer)) PostExplorerFolder(folder);
         if (Tracing) Trace("show steps:" + _marks);
     }
 
@@ -426,19 +440,12 @@ public sealed partial class MainForm : Form
     bool RegisterHotkey()
     {
         UnregisterHotkey();
-        if (!TryParseHotkey(_settings.Hotkey, out uint modifiers, out uint key)) return false;
-
-        if (Native.RegisterHotKey(Handle, HotkeyId, modifiers | Native.MOD_NOREPEAT, key))
-        {
-            _hotkeyRegistered = true;
-        }
-        else
-        {
-            // Windows keeps some combinations for itself (Win+Space among them). Take those over
-            // with a keyboard hook instead.
-            _hotkeyHook = HotkeyHook.TryInstall(modifiers, key, () => BeginInvoke(Toggle));
-            _hotkeyRegistered = _hotkeyHook is not null;
-        }
+        Native.RegisterHotKey(Handle, HotkeyId, Native.MOD_WIN | Native.MOD_NOREPEAT, 0x20);
+        _hotkeyHook = HotkeyHook.TryInstall(0x20,
+            () => BeginInvoke(ShowPalette), () => BeginInvoke(ShowWithContext));
+        _hotkeyRegistered = _hotkeyHook is not null;
+        _contextHotkeyRegistered = Native.RegisterHotKey(Handle, ContextHotkeyId,
+            Native.MOD_WIN | Native.MOD_ALT | Native.MOD_NOREPEAT, 0x20);
         return _hotkeyRegistered;
     }
 
@@ -446,31 +453,10 @@ public sealed partial class MainForm : Form
     {
         if (_hotkeyHook is not null) _hotkeyHook.Dispose();
         else if (_hotkeyRegistered) Native.UnregisterHotKey(Handle, HotkeyId);
+        if (_contextHotkeyRegistered) Native.UnregisterHotKey(Handle, ContextHotkeyId);
         _hotkeyHook = null;
         _hotkeyRegistered = false;
-    }
-
-    /// <summary>Parses "Ctrl+Alt+Space" style text. At least one modifier is required.</summary>
-    static bool TryParseHotkey(string text, out uint modifiers, out uint key)
-    {
-        modifiers = 0;
-        key = 0;
-        foreach (var part in text.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
-        {
-            switch (part.ToLowerInvariant())
-            {
-                case "ctrl" or "control": modifiers |= Native.MOD_CONTROL; break;
-                case "alt": modifiers |= Native.MOD_ALT; break;
-                case "shift": modifiers |= Native.MOD_SHIFT; break;
-                case "win" or "meta": modifiers |= Native.MOD_WIN; break;
-                default:
-                    if (part.Length == 1 && char.IsAsciiLetterOrDigit(part[0])) key = char.ToUpperInvariant(part[0]);
-                    else if (Enum.TryParse<Keys>(part, ignoreCase: true, out var parsed) && !char.IsAsciiDigit(part[0])) key = (uint)parsed;
-                    else return false;
-                    break;
-            }
-        }
-        return key != 0 && modifiers != 0;
+        _contextHotkeyRegistered = false;
     }
 
     // ---- web view ----------------------------------------------------------------------
