@@ -39,6 +39,8 @@ static class Program
         using var instance = new Mutex(initiallyOwned: true, InstanceName, out bool first);
         if (!first)
         {
+            // A second login launcher may start after the background instance is ready.
+            if (args.Contains("--background")) return;
             // Already running: ask that instance to show itself instead of starting another.
             if (EventWaitHandle.TryOpenExisting(ShowSignalName, out var signal))
             {
