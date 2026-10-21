@@ -11,7 +11,7 @@ cd /d "%~dp0"
 set "APP=EasySearch"
 set "RID=win-x64"
 set "INSTALL=%LOCALAPPDATA%\Programs\%APP%"
-set "STAGE=%~dp0artifacts\install-%RID%"
+set "STAGE=%TEMP%\%APP%-build\%RID%"
 set "SHORTCUT=%APPDATA%\Microsoft\Windows\Start Menu\Programs\%APP%.lnk"
 
 where dotnet >nul 2>&1
@@ -81,6 +81,8 @@ if errorlevel 1 (
     echo [error] %APP% did not stay running. Start "%INSTALL%\%APP%.exe" to see the error.
     goto :fail
 )
+
+if exist "%STAGE%" rmdir /s /q "%STAGE%"
 
 echo.
 echo Installed %APP% %VERSION% to "%INSTALL%" and started it.
