@@ -36,6 +36,7 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        AppSettings.ApplyLaunchAtLogin(AppSettings.Load().LaunchAtLogin);
         using var instance = new Mutex(initiallyOwned: true, InstanceName, out bool first);
         if (!first)
         {
