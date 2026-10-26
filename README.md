@@ -1,7 +1,8 @@
 # EasySearch
 
 Instant file and folder search for Windows, in a frosted-glass command palette.
-Press **Win+Space** anywhere, type a few letters, hit Enter.
+Press **Win+Space** anywhere, type a few letters, and press **Enter** to keep the term as a tag;
+with the box clear, **Enter** opens the best match.
 
 ![EasySearch](docs/screenshot.png)
 
