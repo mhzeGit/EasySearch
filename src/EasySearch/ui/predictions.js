@@ -145,5 +145,9 @@ window.setupPredictions = (input, mirror, host) => {
   input.addEventListener('compositionend', () => { composing = false; render(); });
   document.addEventListener('selectionchange', render);
   new ResizeObserver(render).observe(input);
+  // The app clears the box when a term becomes a chip, which can leave the ghost text behind;
+  // it also re-renders after layout changes. Both helpers are intentionally small.
+  window.renderPrediction = render;
+  window.clearPrediction = () => { ghost.textContent = ''; context = null; };
   return onMessage;
 };

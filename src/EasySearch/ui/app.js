@@ -246,8 +246,10 @@
     view: 'main',
     settingsTab: 'general',
     recording: false,
-    query: '', // the complete query, including inline filter terms
-    explorerToken: '',
+    query: '', // the complete query: committed chips plus the text still in the box
+    committed: [], // finished query terms, applied but shown as tags under the box
+    editingId: 0, // the committed chip whose text is back in the box for editing
+    explorerChipId: 0, // the automatic "in:" chip for the Explorer window the palette opened from
     types: [], // named types from the host: { name, label, exts, kind }
     sort: 'relevance',
     sortDirections: Object.fromEntries(SORTS.map(s => [s.id, !!s.desc])),
@@ -330,63 +332,279 @@
     }
     if (at < value.length) html += span(value.slice(at), at, value.length);
     if (queryHighlight.innerHTML !== html) queryHighlight.innerHTML = html;
-    const controls = tokens.filter(token => token.key && token.key !== 'folder').map(token => {
-      const path = token.text.slice(token.key.length + 1).replace(/^"|"$/g, '');
-      const folder = /^(in|source|location|where|under|parent)$/.test(token.key) && path;
-      const label = folder ? path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path : token.text;
-      const content = folder
-        ? '<button type="button" class="query-folder-filter" data-folder-path="' + esc(path) +
-          '" title="Open ' + esc(path) + ' in File Explorer" aria-label="Open ' + esc(path) +
-          ' in File Explorer">' + icon('folder', 14) + '<span>' + esc(label) + '</span></button>'
-        : '<button type="button" class="filter-edit" data-filter-start="' + token.start +
-          '" data-filter-end="' + token.end + '" title="Edit ' + esc(token.text) +
-          '" aria-label="Edit ' + esc(token.text) + '">' + esc(label) + '</button>';
-      return '<span class="query-filter-chip">' + content +
-        '<button type="button" class="filter-remove" data-filter-start="' + token.start +
-        '" data-filter-end="' + token.end + '" title="Remove ' + esc(token.key) +
-        ' filter" aria-label="Remove ' + esc(token.key) + ' filter">' + icon('x', 10) + '</button></span>';
-    }).join('');
+    const controls = state.committed
+      .filter(chip => chip.id !== state.editingId)
+      .map(chipHtml)
+      .join('');
     if (activeFilters.innerHTML !== controls) activeFilters.innerHTML = controls;
     syncQueryLayout();
   }
 
-  function removeFilterToken(start, end) {
-    let before = els.query.value.slice(0, start).trimEnd();
-    let after = els.query.value.slice(end).trimStart();
-    // Clean only the removed term's boundary. Global whitespace replacement corrupts
-    // quoted names and paths, and global operator cleanup changes unrelated groups.
-    while (true) {
-      if (/(^|[\s(])NOT$/.test(before)) before = before.slice(0, -3).trimEnd();
-      else if (before.endsWith('(') && after.startsWith(')')) {
-        before = before.slice(0, -1).trimEnd();
-        after = after.slice(1).trimStart();
-      } else break;
+  // ---- committed query chips -------------------------------------------------------------
+  // Typing fills the search box; Enter (or moving on to another term with a space) turns what
+  // was typed into a chip under the box. The chip stays part of the query, while the box is
+  // free for the next condition. Clicking a chip puts its text back in the box to edit it.
+
+  const LOGIC_CHIP = /^(AND|OR|NOT|&&|\|\||\|)$/;
+  const FILTER_CHIP = /^(type|t|ext|kind|size|date|dm|modified|changed|updated|datemodified|notin|in|source|location|inside|foldername|folder-name|where|under|parent|path|regex|folders?|files?):/i;
+
+  /** Splits query text into space-separated chunks, keeping "quoted phrases" whole. */
+  function splitQueryChunks(text) {
+    const chunks = [];
+    let current = '', quote = false;
+    for (const char of String(text)) {
+      if (char === '"') { quote = !quote; current += char; continue; }
+      if (!quote && /\s/.test(char)) {
+        if (current) chunks.push(current);
+        current = '';
+        continue;
+      }
+      current += char;
     }
-    const previousOperator = before.match(/(^|[\s(])(?:AND|OR|&&|\|\|)$/i);
-    if (previousOperator) before = before.slice(0, previousOperator.index + previousOperator[1].length).trimEnd();
-    else after = after.replace(/^(?:AND|OR|&&|\|\|)(?=\s|\)|$)\s*/i, '');
-    const separator = before && after && !before.endsWith('(') && !after.startsWith(')') ? ' ' : '';
-    const query = before + separator + after;
-    els.query.value = query;
-    if (state.explorerToken && !query.includes(state.explorerToken)) state.explorerToken = '';
-    syncQuery();
-    renderQueryHighlight();
-    newSearch();
-    els.query.focus();
-    const caret = before.length + separator.length;
-    els.query.setSelectionRange(caret, caret);
-    syncQueryLayout();
+    if (current) chunks.push(current);
+    return { chunks, quote };
   }
 
-  function insertFilterToken(token) {
+  function chipFamily(text) {
+    if (LOGIC_CHIP.test(text)) return 'logic';
+    const filter = FILTER_CHIP.exec(text);
+    if (!filter) return 'text';
+    const key = filter[1].toLowerCase();
+    if (/^(type|t|ext|kind)$/.test(key)) return 'type';
+    if (key === 'size') return 'size';
+    if (/^(date|dm|modified|changed|updated|datemodified)$/.test(key)) return 'date';
+    if (key === 'notin') return 'notin';
+    if (/^(in|source|location|where|under|parent)$/.test(key)) return 'location';
+    if (/^(inside|foldername|folder-name)$/.test(key)) return 'foldername';
+    return 'other';
+  }
+
+  function chipHtml(chip) {
+    const text = chip.text, family = chipFamily(text);
+    const remove = '<button type="button" class="filter-remove" data-chip-id="' + chip.id +
+      '" title="Remove ' + esc(text) + '" aria-label="Remove ' + esc(text) + '">' + icon('x', 10) + '</button>';
+    if (family === 'logic' || family === 'text') {
+      const label = family === 'text' ? text.replace(/^"|"$/g, '') : text;
+      const logicClass = family === 'logic' && /^(AND|OR|NOT)$/i.test(text) ? ' logic-' + text.toLowerCase() : '';
+      return '<span class="query-filter-chip query-chip-' + family + logicClass + '" data-chip-id="' + chip.id + '">' +
+        '<button type="button" class="filter-edit" data-chip-id="' + chip.id +
+        '" title="Edit ' + esc(text) + '" aria-label="Edit ' + esc(text) + '">' + esc(label) + '</button>' +
+        remove + '</span>';
+    }
+
+    const colon = text.indexOf(':');
+    const key = text.slice(0, colon + 1), value = text.slice(colon + 1);
+    const path = value.replace(/^"|"$/g, '');
+    const folder = family === 'location' && path;
+    const label = folder ? path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path : value;
+    const open = folder
+      ? '<button type="button" class="chip-folder-open" data-folder-path="' + esc(path) +
+        '" title="Open ' + esc(path) + ' in File Explorer" aria-label="Open ' + esc(path) +
+        ' in File Explorer">' + icon('folder', 13) + '</button>'
+      : '';
+    const body = folder ? esc(label)
+      : '<span class="query-filter-label">' + esc(key) + '</span><span class="query-filter-value">' + esc(label) + '</span>';
+    return '<span class="query-filter-chip query-chip-' + family + '" data-chip-id="' + chip.id + '">' + open +
+      '<button type="button" class="filter-edit" data-chip-id="' + chip.id +
+      '" title="Edit ' + esc(text) + '" aria-label="Edit ' + esc(text) + '">' + body + '</button>' +
+      remove + '</span>';
+  }
+
+  function addCommitted(text, { prepend = false } = {}) {
+    text = String(text || '').trim();
+    if (!text) return null;
+    const chip = { id: ++chipSeq, text };
+    if (prepend) state.committed.unshift(chip);
+    else state.committed.push(chip);
+    return chip;
+  }
+
+  /** Adds each space-separated term in text as a chip. */
+  function commitText(text) {
+    const { chunks } = splitQueryChunks(text);
+    for (const chunk of chunks) addCommitted(chunk);
+    return chunks;
+  }
+
+  /** The whole query: every committed chip plus whatever is still being typed. */
+  function composeQuery() {
+    const parts = state.committed.map(chip => chip.text);
+    const draft = els.query.value.trim();
+    if (state.editingId) {
+      const index = state.committed.findIndex(chip => chip.id === state.editingId);
+      if (index >= 0) {
+        if (draft) parts[index] = draft;
+        else parts.splice(index, 1);
+      }
+    } else if (draft) parts.push(draft);
+    return parts.join(' ').trim();
+  }
+
+  /** Moves complete terms out of the box as they are followed by a space, leaving a clear box. */
+  function autoCommitInput() {
+    if (queryComposing || state.editingId) return false;
     const value = els.query.value;
-    const left = value.trimEnd();
-    els.query.value = left + (left ? ' AND ' : '') + token;
+    const { chunks, quote } = splitQueryChunks(value);
+    const endsWithSpace = /\s$/.test(value);
+    const complete = quote ? chunks.slice(0, -1) : endsWithSpace ? chunks : chunks.slice(0, -1);
+    if (complete.length === 0) {
+      if (endsWithSpace && chunks.length === 0) els.query.value = '';
+      return false;
+    }
+    for (const chunk of complete) addCommitted(chunk);
+    els.query.value = quote ? chunks[chunks.length - 1] : endsWithSpace ? '' : chunks[chunks.length - 1];
     const caret = els.query.value.length;
-    els.query.focus();
     els.query.setSelectionRange(caret, caret);
-    renderQueryHighlight();
+    return true;
+  }
+
+  /** Enter in a non-empty box commits its terms; an empty box opens the selection instead. */
+  function commitInput() {
+    if (state.editingId) { finishEdit(); return true; }
+    const text = els.query.value.trim();
+    if (!text) return false;
+    const before = state.query;
+    commitText(text);
+    els.query.value = '';
     syncQuery();
+    renderQueryHighlight();
+    renderHints();
+    renderCount();
+    els.query.focus();
+    if (state.query !== before) newSearch();
+    return true;
+  }
+
+  /** Clicking a chip lifts its text back into the box; committing puts it in the same slot. */
+  function beginEditChip(id) {
+    const chip = state.committed.find(entry => entry.id === id);
+    if (!chip || state.editingId === id) return;
+    if (state.editingId) finishEdit();
+    if (els.query.value.trim()) {
+      commitText(els.query.value);
+      els.query.value = '';
+    }
+    if (state.explorerChipId === id) state.explorerChipId = 0; // edited by hand: it is no longer automatic
+    state.editingId = id;
+    els.query.value = chip.text;
+    const before = state.query;
+    syncQuery();
+    renderQueryHighlight();
+    renderHints();
+    els.query.focus();
+    els.query.setSelectionRange(0, els.query.value.length);
+    if (state.query !== before) newSearch();
+  }
+
+  function finishEdit({ cancel = false } = {}) {
+    if (!state.editingId) return false;
+    const before = state.query;
+    const index = state.committed.findIndex(chip => chip.id === state.editingId);
+    if (index >= 0 && !cancel) {
+      const text = els.query.value.trim();
+      const chunks = splitQueryChunks(text).chunks;
+      if (chunks.length) {
+        // Editing can add another condition ("type:image size:>1mb"); each term becomes its own tag.
+        state.committed.splice(index, 1, ...chunks.map(chunk => ({ id: ++chipSeq, text: chunk })));
+      } else state.committed.splice(index, 1);
+    }
+    state.editingId = 0;
+    els.query.value = '';
+    syncQuery();
+    renderQueryHighlight();
+    renderHints();
+    els.query.focus();
+    if (state.query !== before) newSearch();
+    return true;
+  }
+
+  function removeCommittedChip(id) {
+    if (state.editingId && state.editingId !== id) finishEdit();
+    let index = state.committed.findIndex(chip => chip.id === id);
+    if (index < 0) return;
+    if (state.editingId === id) { state.editingId = 0; els.query.value = ''; }
+    if (state.explorerChipId === id) state.explorerChipId = 0;
+    state.committed.splice(index, 1);
+
+    // Do not leave a bare AND/OR/NOT at the seam where the chip used to be.
+    const previous = state.committed[index - 1], next = state.committed[index];
+    if (previous && (previous.text === 'NOT' || /^(AND|OR|&&|\|\||\|)$/.test(previous.text))) {
+      if (state.explorerChipId === previous.id) state.explorerChipId = 0;
+      state.committed.splice(index - 1, 1);
+    } else if (next && /^(AND|OR|&&|\|\||\|)$/.test(next.text)) {
+      if (state.explorerChipId === next.id) state.explorerChipId = 0;
+      state.committed.splice(index, 1);
+    }
+
+    normalizeChips();
+    syncQuery();
+    renderQueryHighlight();
+    renderHints();
+    newSearch();
+    els.query.focus();
+  }
+
+  /** Drops dangling operators left behind by removals, so the remaining chips still parse. */
+  function normalizeChips() {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      state.committed = state.committed.filter(chip => {
+        if (chip.text) return true;
+        changed = true;
+        return false;
+      });
+      const operator = chip => /^(AND|OR|&&|\|\||\|)$/.test(chip.text);
+      // A leading NOT belongs to the term after it ("NOT draft"), so only a stray AND/OR goes.
+      if (state.committed.length && operator(state.committed[0])) {
+        if (state.explorerChipId === state.committed[0].id) state.explorerChipId = 0;
+        state.committed.shift();
+        changed = true;
+      }
+      const last = state.committed[state.committed.length - 1];
+      if (last && (operator(last) || last.text === 'NOT')) {
+        if (state.explorerChipId === last.id) state.explorerChipId = 0;
+        state.committed.pop();
+        changed = true;
+      }
+      for (let i = 1; i < state.committed.length; i++) {
+        if (operator(state.committed[i - 1]) && operator(state.committed[i])) {
+          if (state.explorerChipId === state.committed[i - 1].id) state.explorerChipId = 0;
+          state.committed.splice(i - 1, 1);
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+
+  /** Adds a filter token as a chip; an empty filter stays in the box so it can be filled in. */
+  function insertFilterToken(token) {
+    if (!token) return;
+    if (state.editingId) finishEdit();
+    if (els.query.value.trim()) {
+      commitText(els.query.value);
+      els.query.value = '';
+    }
+    if (token.endsWith(':')) {
+      els.query.value = token;
+      els.query.focus();
+      els.query.setSelectionRange(token.length, token.length);
+    } else addCommitted(token);
+    syncQuery();
+    renderQueryHighlight();
+    renderHints();
+    newSearch();
+  }
+
+  function clearQuery() {
+    state.committed = [];
+    state.editingId = 0;
+    state.explorerChipId = 0;
+    els.query.value = '';
+    syncQuery();
+    renderQueryHighlight();
+    renderHints();
     newSearch();
   }
 
@@ -633,9 +851,10 @@
     }
   }
 
-  /** The search box contains the complete query; filter pills are only a visual treatment. */
+  /** The complete query is the committed chips plus the text still being edited. */
   function syncQuery() {
-    state.query = els.query.value.trim();
+    state.query = composeQuery();
+    els.query.placeholder = state.committed.length ? 'Add another condition' : 'Search files and folders';
     renderFilters();
   }
 
@@ -1004,6 +1223,11 @@
 
   function renderHints() {
     const item = selectedItem();
+    const typing = !!els.query.value.trim() || !!state.editingId;
+    if (typing) {
+      els.hints.innerHTML = hint('Tag', '↵') + hint('Reveal', 'Ctrl', '↵') + hint('Close', 'Esc');
+      return;
+    }
     if (!item) els.hints.innerHTML = hint('Filters', 'Tab') + hint('Close', 'Esc');
     else if (item.command) els.hints.innerHTML = hint('Run', '↵') + hint('Filters', 'Tab') + hint('Settings', 'Ctrl', ',');
     else els.hints.innerHTML = hint('Open', '↵') + hint('Reveal', 'Ctrl', '↵') + hint('Actions', 'Ctrl', 'K');
@@ -1029,19 +1253,27 @@
   }
 
   function resetFilters() {
+    if (state.editingId) { state.editingId = 0; els.query.value = ''; }
+    state.committed = state.committed.filter(chip => !FILTER_CHIP.test(chip.text));
+    normalizeChips();
     els.query.value = els.query.value.replace(FILTER_PATTERN, '$1')
       .replace(/(^|\s)(?:AND|OR|NOT)(?=\s|$)/gi, '$1').replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
-    state.explorerToken = '';
-    syncQuery(); renderQueryHighlight(); newSearch();
+    syncQuery(); renderQueryHighlight(); renderHints(); newSearch();
   }
 
+  /** Replaces the whole query with chips, as history, presets and "search here" all do. */
   function setQuery(text) {
-    els.query.value = text;
-    state.explorerToken = '';
-    renderQueryHighlight();
+    state.committed = [];
+    state.editingId = 0;
+    state.explorerChipId = 0;
+    els.query.value = '';
+    commitText(text);
     syncQuery();
+    renderQueryHighlight();
+    renderHints();
     els.query.focus();
     newSearch();
+    return state.committed;
   }
 
   function openAddFilters() {
@@ -1476,8 +1708,14 @@
       host.post({ type: 'pickFolder', purpose: 'addFilterPlace' });
       return;
     }
+    const before = state.query;
+    autoCommitInput();
     renderQueryHighlight();
     syncQuery();
+    renderHints();
+    // Finishing a term by typing a space only moves it into a chip; the search itself has not
+    // changed, so leave the current results (and any search still running) alone.
+    if (state.query === before) return;
     // Stop the previous query immediately, then wait for a short pause before scanning again.
     // This avoids starting a full index scan for every character while typing.
     clearTimeout(searchTimer);
@@ -1578,10 +1816,10 @@
     if (remove) {
       e.preventDefault();
       e.stopPropagation();
-      removeFilterToken(Number(remove.dataset.filterStart), Number(remove.dataset.filterEnd));
+      removeCommittedChip(Number(remove.dataset.chipId));
       return;
     }
-    const folder = e.target.closest('.query-folder-filter');
+    const folder = e.target.closest('.chip-folder-open');
     if (folder) {
       e.preventDefault();
       e.stopPropagation();
@@ -1592,9 +1830,7 @@
     if (edit) {
       e.preventDefault();
       e.stopPropagation();
-      els.query.focus();
-      els.query.setSelectionRange(Number(edit.dataset.filterStart), Number(edit.dataset.filterEnd));
-      syncQueryLayout();
+      beginEditChip(Number(edit.dataset.chipId));
       return;
     }
     if (menu.swallow) { menu.swallow = false; e.preventDefault(); e.stopPropagation(); }
@@ -1626,8 +1862,14 @@
       case 'PageUp': select(state.selected - 8); break;
       case 'Home': if (!ctrl) return; select(0); break;
       case 'End': if (!ctrl) return; select(state.items.length - 1); break;
-      case 'Enter': if (ctrl) act('reveal'); else activate(); break;
+      case 'Enter':
+        if (ctrl) act('reveal');
+        else if (!commitInput()) activate();
+        break;
       case 'Backspace': {
+        if (ctrl || els.query.value || state.editingId || state.committed.length === 0) return;
+        e.preventDefault();
+        beginEditChip(state.committed[state.committed.length - 1].id);
         return;
       }
       case 'Tab': {
@@ -1635,6 +1877,15 @@
         break;
       }
       case 'Escape':
+        // Walk back one step at a time: finish editing, then the typed term, then the tags,
+        // and only then slip the palette out of the way.
+        if (state.editingId) { finishEdit({ cancel: true }); break; }
+        if (els.query.value) {
+          els.query.value = '';
+          syncQuery(); renderQueryHighlight(); renderHints(); newSearch();
+          break;
+        }
+        if (state.committed.length) { clearQuery(); break; }
         host.post({ type: 'hide' });
         break;
       case 'k': if (!ctrl) return; openActionsMenu(); break;
@@ -1657,10 +1908,13 @@
       const prefix = state.folderPickQuery || '';
       state.folderPickQuery = '';
       const token = chipToken(newPlaceChip(path));
-      els.query.value = `${prefix}${prefix ? ' AND ' : ''}${token} `;
-      renderQueryHighlight(); syncQuery(); newSearch();
+      if (!token) return;
+      if (state.editingId) finishEdit();
+      if (prefix.trim()) commitText(prefix);
+      els.query.value = '';
+      addCommitted(token);
+      syncQuery(); renderQueryHighlight(); renderHints(); newSearch();
       els.query.focus();
-      els.query.setSelectionRange(els.query.value.length, els.query.value.length);
       return;
     }
     if (purpose === 'exclude') return addExclusion(path);
@@ -1678,17 +1932,19 @@
   function onExplorerFolder(path) {
     if (path) {
       const token = chipToken(newPlaceChip(path, true));
-      if (state.explorerToken && els.query.value.includes(state.explorerToken))
-        els.query.value = els.query.value.replace(state.explorerToken, token);
-      else
-        els.query.value = `${token} ${els.query.value}`.trim();
-      state.explorerToken = token;
-      syncQuery(); renderQueryHighlight(); newSearch();
+      if (!token) return;
+      if (state.editingId) finishEdit();
+      const existing = state.committed.find(chip => chip.id === state.explorerChipId);
+      if (existing) existing.text = token;
+      else {
+        const chip = addCommitted(token, { prepend: true });
+        state.explorerChipId = chip.id;
+      }
+      els.query.value = '';
+      syncQuery(); renderQueryHighlight(); renderHints(); newSearch();
       if (state.view === 'main') toast(`Searching in ${folderName(path)}`);
-    } else if (state.explorerToken) {
-      els.query.value = els.query.value.replace(state.explorerToken, '').replace(/\s{2,}/g, ' ').trim();
-      state.explorerToken = '';
-      syncQuery(); renderQueryHighlight(); newSearch();
+    } else if (state.explorerChipId) {
+      removeCommittedChip(state.explorerChipId);
     }
   }
 
@@ -1746,8 +2002,8 @@
       case 'contextOpen':
         if (message.path) {
           const token = chipToken(newPlaceChip(message.path, true));
-          state.explorerToken = token;
-          setQuery(token);
+          const chips = setQuery(token);
+          state.explorerChipId = chips[chips.length - 1]?.id || 0;
         } else setQuery('');
         break;
       case 'results':

@@ -18,8 +18,12 @@ Press **Win+Space** anywhere, type a few letters, hit Enter.
   opens in well under a tenth of a second.
 - **Filters.** Type (folders, documents, images, video, audio, code, archives, apps, 3D models, or
   *Custom…* for names and suffixes such as `blender` or `.fbx`), size, date modified, and "only inside
-  this folder". Pick one from a drop-down or type `type:`, `size:`, `date:` or `in:` — both give the
-  same small form in the search bar, which you can then adjust. `t:` is a shortcut for `type:`.
+  this folder". Pick one from a drop-down or type `type:`, `size:`, `date:` or `in:`. `t:` is a
+  shortcut for `type:`.
+- **Tags.** A finished condition moves out of the search box and becomes a removable tag underneath
+  it, so a long query no longer hides the text you are typing. Press `Enter` to turn what you have
+  typed into a tag, or simply type a space and start the next condition. Click a tag to put its text
+  back in the box and edit it; press its × to remove it.
 - **Scope control.** Pick which drives and folders are indexed and which folders are left out
   (by name anywhere, like `node_modules`, or by full path). Hidden and system items are opt-in.
 - **Searches where you are.** Press the hotkey while a File Explorer window has focus and EasySearch
@@ -74,14 +78,11 @@ Folder sizes are cached sums of indexed descendant files, updated as files chang
 unreadable, and unscanned linked-folder contents are not counted. Use `type:folder size:>1gb`
 for folders only, or `type:file` to keep size searches restricted to files.
 
-Typing `folder:` opens File Explorer to choose a directory. Typing `size:`, `type:`, `date:`, `in:` or `inside:` in the box turns it into a small form under the box, so you
-can see what to fill in: size takes *at least / at most / between / exactly*, a number and a
-**B / KB / MB / GB / TB** drop-down; type takes names and suffixes with suggestions as you type
-(`blender`, `3D`, `pdf`, `.fbx` …); date takes *in the last N days… / today / this week / on /
-before / after / between* with a calendar; Folder chooses an exact directory or a saved place,
-while Inside matches a folder name anywhere in the indexed paths.
-Backspace on an empty box removes the last form, and the forms turn back into plain text
-as soon as you type `OR`, `NOT` or parentheses.
+Typing `folder:` opens File Explorer to choose a directory. `size:`, `type:`, `date:`, `in:` and
+`inside:` autocomplete as you type: type names and suffixes (`blender`, `3D`, `pdf`, `.fbx` …), size
+groups, date words and folder names. Press `Enter` — or type a space and start the next condition —
+to move the finished condition down into a tag. Click a tag to put its text back in the box for
+editing, or press its × to remove it. Backspace on an empty box pulls the last tag back into the box.
 
 Operators combine freely: `type:image date:30d size:>2mb !screenshot`, or in words,
 `holiday AND type:.jpg NOT draft`.
@@ -104,13 +105,14 @@ still switches layouts). Pick any other combination in **Settings → General** 
 | --- | --- |
 | `Win+Space` | show / hide (change it in Settings) |
 | `↑` `↓` `PgUp` `PgDn` | move through results |
-| `Enter` | open |
+| `Enter` | add the typed condition as a tag; when the box is empty, open the selection |
 | `Ctrl+Enter` | reveal in Explorer |
 | `Ctrl+K` or right-click | actions menu |
 | `Ctrl+C` / `Ctrl+Shift+C` | copy path / copy name |
 | `Tab` / `Shift+Tab` | cycle the type filter |
 | `Ctrl+,` | settings |
-| `Esc` | clear the search, then the filters, then hide |
+| `Backspace` | edit the last tag when the box is empty |
+| `Esc` | cancel an edit, clear the text, then the tags, then hide |
 
 ## How it works
 
