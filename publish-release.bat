@@ -107,6 +107,12 @@ if errorlevel 1 (
     exit /b 1
 )
 echo Release ZIP: "%ZIP%"
+set "BUILD_ID="
+for /f "delims=" %%B in ('powershell -NoProfile -Command "(ConvertFrom-Json -InputObject ([IO.File]::ReadAllText('%OUT%\update-manifest.json'))).buildId"') do set "BUILD_ID=%%B"
+if not defined BUILD_ID (
+    echo [error] The release build identity is missing.
+    exit /b 1
+)
 
 set "DIRTY="
 for /f "delims=" %%S in ('git status --porcelain 2^>nul') do set "DIRTY=1"
@@ -148,9 +154,9 @@ echo.
 echo === 4/4  Uploading to GitHub release v%VERSION% ===
 call "%GH%" release view v%VERSION% >nul 2>&1
 if errorlevel 1 (
-    call "%GH%" release create v%VERSION% "%ZIP%" --title "%APP% %VERSION%" --notes "Portable Windows x64 build of %APP% %VERSION%. Unzip it and run %APP%.exe. Needs Windows 10 or 11 with the WebView2 runtime, which is already part of Windows 11."
+    call "%GH%" release create v%VERSION% "%ZIP%#build:%BUILD_ID%" --title "%APP% %VERSION%" --notes "Portable Windows x64 build of %APP% %VERSION%. Unzip it and run %APP%.exe. Needs Windows 10 or 11 with the WebView2 runtime, which is already part of Windows 11."
 ) else (
-    call "%GH%" release upload v%VERSION% "%ZIP%" --clobber
+    call "%GH%" release upload v%VERSION% "%ZIP%#build:%BUILD_ID%" --clobber
 )
 if errorlevel 1 (
     echo [error] Upload to GitHub failed.

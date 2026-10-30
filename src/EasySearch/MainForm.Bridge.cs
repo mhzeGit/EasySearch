@@ -83,6 +83,7 @@ public sealed partial class MainForm
 
             case "ready":
                 _uiReady = true;
+                EasyTools.Updating.AppUpdater.AcknowledgeStartup(Environment.GetCommandLineArgs());
                 if (message.TryGetProperty("scale", out var scale)) SetUiScale(scale.GetDouble());
                 Post(new
                 {
@@ -96,6 +97,7 @@ public sealed partial class MainForm
                     hotkeyOk = _hotkeyRegistered,
                 });
                 PostStatus();
+                PostUpdateState();
                 if (_options.OpenSettings) Post(new { type = "openSettings" });
                 if (_options.Query is not null) Post(new { type = "setQuery", query = _options.Query });
                 if (_options.Capture is not null) CaptureAndQuit(_options.Capture);
@@ -149,6 +151,14 @@ public sealed partial class MainForm
 
             case "quit":
                 Quit();
+                break;
+
+            case "checkUpdate":
+                _ = RunUpdateAsync(install: false);
+                break;
+
+            case "installUpdate":
+                _ = RunUpdateAsync(install: true);
                 break;
         }
     }

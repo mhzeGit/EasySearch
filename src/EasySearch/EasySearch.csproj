@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\EasySearch.Core\EasySearch.Core.csproj" />
+    <EmbeddedResource Include="Updating\ApplyUpdate.ps1" LogicalName="EasyTools.ApplyUpdate.ps1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -36,4 +37,10 @@
     <Reference Include="$(NetCoreTargetingPackRoot)\Microsoft.WindowsDesktop.App.Ref\*\ref\net10.0\UIAutomationTypes.dll" />
   </ItemGroup>
 
+  <Target Name="WriteBuildUpdateManifest" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\tools\WriteUpdateManifest.ps1&quot; -Directory &quot;$(TargetDir).&quot; -Product EasySearch -Version &quot;$(Version)&quot;" />
+  </Target>
+  <Target Name="WritePublishUpdateManifest" AfterTargets="Publish">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\tools\WriteUpdateManifest.ps1&quot; -Directory &quot;$(PublishDir).&quot; -Product EasySearch -Version &quot;$(Version)&quot;" />
+  </Target>
 </Project>

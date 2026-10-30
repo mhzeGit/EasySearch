@@ -243,6 +243,7 @@
     places: [],
     home: '',
     version: '',
+    update: { busy: false, available: false, text: 'Check GitHub for the latest build. Settings and index are preserved.' },
     view: 'main',
     settingsTab: 'general',
     recording: false,
@@ -1590,6 +1591,7 @@
             <div class="about"><div class="about-logo">${icon('search', 28)}</div>
               <div><div class="group-title" style="margin:0">EasySearch ${esc(state.version)}</div>
               <div class="field-note">Instant file and folder search for Windows. Prototype build.</div></div></div>
+            ${field('Updates', `<span role="status" aria-live="polite">${esc(state.update.text)}</span>`, `<button class="btn" id="update" ${state.update.busy ? 'disabled' : ''}>${state.update.busy ? 'Please wait…' : state.update.available ? 'Update & restart' : 'Check for updates'}</button>`)}
             ${field('Quit EasySearch', 'Stops indexing and removes the shortcut until you start it again.', '<button class="btn danger" id="quit">Quit</button>')}
           </div></div>`;
     }
@@ -1663,6 +1665,7 @@
     if (target.id === 'exclude-add') return addExclusion($('#exclude-input').value);
     if (target.id === 'rebuild') { host.post({ type: 'reindex' }); return toast('Rebuilding the index…'); }
     if (target.id === 'quit') return host.post({ type: 'quit' });
+    if (target.id === 'update' && !state.update.busy) return host.post({ type: state.update.available ? 'installUpdate' : 'checkUpdate' });
 
     if (d.toggle) s[d.toggle] = !s[d.toggle];
     else if (d.themeChoice) s.theme = d.themeChoice;
@@ -1974,6 +1977,10 @@
   host.listen(message => {
     onPredictionMessage(message);
     switch (message.type) {
+      case 'updateState':
+        state.update = { busy: message.busy, available: message.available, text: message.text };
+        if (state.view === 'settings' && state.settingsTab === 'about') renderSettings();
+        break;
       case 'init':
         state.settings = message.settings;
         state.places = message.places || [];
@@ -2025,7 +2032,7 @@
         break;
       case 'folderPicked': onFolderPicked(message); break;
       case 'toast': toast(message.text, message.error); break;
-      case 'openSettings': openSettings(); break;
+      case 'openSettings': openSettings(message.tab); break;
       case 'setQuery': if (state.view === 'settings') closeSettings(); setQuery(message.query); break;
       case 'shown':
         if (state.view === 'main') { els.query.focus(); els.query.select(); }

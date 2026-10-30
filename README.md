@@ -182,6 +182,25 @@ to a folder to keep settings and the index there instead of in `%APPDATA%` / `%L
 repository's GitHub Release, replacing the previous build. The first run signs in to GitHub and
 creates the repository. Builds are never committed to git.
 
+### Updating
+
+Open **Settings → About → Check for updates**, or choose **Check for updates…** in the tray menu.
+If a build is available, **Update & restart** downloads and verifies the GitHub release ZIP,
+closes EasySearch, replaces the application files in the same folder, and restarts it quietly.
+Your settings, index, hotkey and launch-at-login preference are preserved. No Git or GitHub login
+is required on the receiving machine; releases must be public.
+
+Updates detect both newer version tags and replacement ZIPs under the same version. The build
+includes `update-manifest.json` to identify owned files: obsolete application files are removed,
+while unlisted personal files are left alone. Downloads and backups are cleaned up after success
+or successful rollback. If the new app cannot start, the installer restores the previous build;
+an interrupted transaction is recovered on the next launch. Failed recovery retains its backup.
+The app folder must be writable. Older builds without this button need one manual installation
+of the current ZIP to enable future in-app updates.
+
+`powershell -NoProfile -ExecutionPolicy Bypass -File tools/TestUpdate.ps1` tests the installer
+with disposable apps, including rollback, locked files and interrupted transactions.
+
 ## Status
 
 Working and verified: indexing, search and every operator above, change-journal updates (live and

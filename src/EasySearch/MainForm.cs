@@ -66,6 +66,7 @@ public sealed partial class MainForm : Form
         menu.Items.Add("Open EasySearch", null, (_, _) => ShowPalette());
         menu.Items.Add("Settings…", null, (_, _) => { ShowPalette(); Post(new { type = "openSettings" }); });
         menu.Items.Add("Rebuild index", null, (_, _) => _index!.Rebuild(CreateScope()));
+        menu.Items.Add("Check for updates…", null, (_, _) => { ShowPalette(); Post(new { type = "openSettings", tab = "about" }); _ = RunUpdateAsync(false); });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => Quit());
         _tray = new NotifyIcon { Icon = Icon, Text = "EasySearch", ContextMenuStrip = menu, Visible = true };
