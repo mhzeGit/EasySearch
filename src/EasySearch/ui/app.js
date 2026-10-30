@@ -342,9 +342,9 @@
   }
 
   // ---- committed query chips -------------------------------------------------------------
-  // Typing fills the search box; Enter (or moving on to another term with a space) turns what
-  // was typed into a chip under the box. The chip stays part of the query, while the box is
-  // free for the next condition. Clicking a chip puts its text back in the box to edit it.
+  // Typing fills the search box; Enter turns what was typed into chips under the box.
+  // Each chip stays part of the query, while the box is free for the next condition.
+  // Clicking a chip puts its text back in the box to edit it.
 
   const LOGIC_CHIP = /^(AND|OR|NOT|&&|\|\||\|)$/;
   const FILTER_CHIP = /^(type|t|ext|kind|size|date|dm|modified|changed|updated|datemodified|notin|in|source|location|inside|foldername|folder-name|where|under|parent|path|regex|folders?|files?):/i;
@@ -439,24 +439,6 @@
       }
     } else if (draft) parts.push(draft);
     return parts.join(' ').trim();
-  }
-
-  /** Moves complete terms out of the box as they are followed by a space, leaving a clear box. */
-  function autoCommitInput() {
-    if (queryComposing || state.editingId) return false;
-    const value = els.query.value;
-    const { chunks, quote } = splitQueryChunks(value);
-    const endsWithSpace = /\s$/.test(value);
-    const complete = quote ? chunks.slice(0, -1) : endsWithSpace ? chunks : chunks.slice(0, -1);
-    if (complete.length === 0) {
-      if (endsWithSpace && chunks.length === 0) els.query.value = '';
-      return false;
-    }
-    for (const chunk of complete) addCommitted(chunk);
-    els.query.value = quote ? chunks[chunks.length - 1] : endsWithSpace ? '' : chunks[chunks.length - 1];
-    const caret = els.query.value.length;
-    els.query.setSelectionRange(caret, caret);
-    return true;
   }
 
   /** Enter in a non-empty box commits its terms; an empty box opens the selection instead. */
@@ -1712,12 +1694,10 @@
       return;
     }
     const before = state.query;
-    autoCommitInput();
     renderQueryHighlight();
     syncQuery();
     renderHints();
-    // Finishing a term by typing a space only moves it into a chip; the search itself has not
-    // changed, so leave the current results (and any search still running) alone.
+    // Keep the current results when only the query's surrounding whitespace changes.
     if (state.query === before) return;
     // Stop the previous query immediately, then wait for a short pause before scanning again.
     // This avoids starting a full index scan for every character while typing.

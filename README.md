@@ -23,7 +23,7 @@ with the box clear, **Enter** opens the best match.
   shortcut for `type:`.
 - **Tags.** A finished condition moves out of the search box and becomes a removable tag underneath
   it, so a long query no longer hides the text you are typing. Press `Enter` to turn what you have
-  typed into a tag, or simply type a space and start the next condition. Click a tag to put its text
+  typed into tags; spaces stay in the search box. Click a tag to put its text
   back in the box and edit it; press its × to remove it.
 - **Scope control.** Pick which drives and folders are indexed and which folders are left out
   (by name anywhere, like `node_modules`, or by full path). Hidden and system items are opt-in.
@@ -81,8 +81,8 @@ for folders only, or `type:file` to keep size searches restricted to files.
 
 Typing `folder:` opens File Explorer to choose a directory. `size:`, `type:`, `date:`, `in:` and
 `inside:` autocomplete as you type: type names and suffixes (`blender`, `3D`, `pdf`, `.fbx` …), size
-groups, date words and folder names. Press `Enter` — or type a space and start the next condition —
-to move the finished condition down into a tag. Click a tag to put its text back in the box for
+groups, date words and folder names. Press `Enter` to move finished conditions down into tags;
+spaces stay in the search box. Click a tag to put its text back in the box for
 editing, or press its × to remove it. Backspace on an empty box pulls the last tag back into the box.
 
 Operators combine freely: `type:image date:30d size:>2mb !screenshot`, or in words,
